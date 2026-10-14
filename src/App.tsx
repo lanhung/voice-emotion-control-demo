@@ -1,10 +1,12 @@
 import { lazy, Suspense, useEffect, useRef, useState, type CSSProperties } from 'react';
-import { AudioLines, ArrowDownToLine, ArrowUpRight, Check, ChevronDown, CircleHelp, Cpu, Expand,
-  Headphones, LoaderCircle, Mic, Minimize, MoveUpRight, ShieldCheck, Sparkles, Square, Trash2, X } from 'lucide-react';
+import { AudioLines, ArrowDownToLine, ArrowUpRight, Check, ChevronDown, Circle, CircleHelp, Cpu, Expand,
+  Grid3X3, Headphones, LoaderCircle, Mic, Minimize, MoveUpRight, ShieldCheck, Sparkles, Square, Trash2, X } from 'lucide-react';
 import { emotions, previewEmotions, type Emotion } from '../shared/emotions';
 import { useVoice } from './hooks/useVoice';
 import { useHealth } from './hooks/useHealth';
 import MonitorPanel, { MicrophoneSelector } from './components/MonitorPanel';
+import LightMatrix from './components/LightMatrix';
+import type { VisualizationMode, VisualizationProps } from './components/visualization';
 
 const LiquidOrb = lazy(() => import('./components/LiquidOrb'));
 const clock = (seconds: number) => `${Math.floor(seconds / 60).toString().padStart(2, '0')}:${(seconds % 60).toString().padStart(2, '0')}`;
@@ -14,6 +16,7 @@ export default function App() {
   const voice = useVoice();
   const health = useHealth();
   const [preview, setPreview] = useState<Emotion | null>(null);
+  const [visualization, setVisualization] = useState<VisualizationMode>('orb');
   const [immersive, setImmersive] = useState(false);
   const [copied, setCopied] = useState(false);
   const helpRef = useRef<HTMLDialogElement>(null);
@@ -26,6 +29,13 @@ export default function App() {
   const language = lastEntry?.language ? ({ zh: '中文', en: '英语', yue: '粤语', ja: '日语', ko: '韩语' }[lastEntry.language] ?? lastEntry.language) : '自动识别';
   const variables = { '--emotion-color': palette.color, '--emotion-secondary': palette.secondary, '--emotion-accent': palette.accent } as CSSProperties;
   const log = voice.log;
+  const visualProps: VisualizationProps = { emotion, level: voice.level, active: listening || preview !== null,
+    source: preview ? 'preview' : voice.lastResult ? 'sensevoice' : 'idle', onEvent: log };
+  const changeVisualization = (mode: VisualizationMode) => {
+    if (mode === visualization) return;
+    setVisualization(mode);
+    log('visual.mode', `切换灯效：${mode === 'matrix' ? '8 × 64 灯光矩阵' : '液态光球'}`, { mode });
+  };
 
   useEffect(() => { log('model.connection', `模型连接状态：${health}`, { status: health }, health === 'unavailable' ? 'warn' : 'info'); }, [health, log]);
 
@@ -73,7 +83,12 @@ export default function App() {
           <p>每一道声音，都有自己的颜色。<br className="mobile-break" /> 说说此刻的心情，看见声音里的你。</p>
         </div>
 
-        <div className="orb-stage">
+        <div className="visualizer-switch" role="group" aria-label="灯效显示模式">
+          <button type="button" aria-pressed={visualization === 'orb'} onClick={() => changeVisualization('orb')}><Circle size={13} />液态光球</button>
+          <button type="button" aria-pressed={visualization === 'matrix'} onClick={() => changeVisualization('matrix')}><Grid3X3 size={13} />灯光矩阵 <span>8 × 64</span></button>
+        </div>
+
+        <div className={`orb-stage ${visualization === 'matrix' ? 'matrix-stage' : ''}`}>
           <div className="orb-ambient" aria-hidden="true" />
           <div className="orbit orbit-one" aria-hidden="true" />
           <div className="orbit orbit-two" aria-hidden="true" />
@@ -82,8 +97,7 @@ export default function App() {
             {immersive ? <Minimize size={17} /> : <Expand size={17} />}
           </button>
           <Suspense fallback={<div className="orb-loading"><LoaderCircle size={24} className="spin" /></div>}>
-            <LiquidOrb emotion={emotion} level={voice.level} active={listening || preview !== null}
-              source={preview ? 'preview' : voice.lastResult ? 'sensevoice' : 'idle'} onEvent={log} />
+            {visualization === 'matrix' ? <LightMatrix {...visualProps} /> : <LiquidOrb {...visualProps} />}
           </Suspense>
           <div className="orb-shadow" aria-hidden="true" />
           <div className="emotion-readout" aria-live="polite">
@@ -154,16 +168,16 @@ export default function App() {
         <div className="transcript-footer"><span><ShieldCheck size={12} />仅保留当前页面最近 120 条记录</span><span>{language}<span className="footer-dot">·</span>{voice.latency === null ? '等待语音输入' : `最近推理 ${voice.latency} ms`}</span></div>
       </section>
 
-      <MonitorPanel voice={voice} health={health} displayEmotion={emotion} preview={preview !== null} />
+      <MonitorPanel voice={voice} health={health} displayEmotion={emotion} preview={preview !== null} visualization={visualization} />
       <footer className="site-footer"><span>A little voice. A world of feeling.</span><span><Cpu size={13} /> SenseVoice<span className="footer-dot">/</span>本地驱动<ArrowUpRight size={12} /></span></footer>
     </main>
 
     <dialog ref={helpRef} className="about-dialog" onClick={(event) => { if (event.target === helpRef.current) helpRef.current.close(); }}>
       <button className="icon-button dialog-close" aria-label="关闭介绍" onClick={() => helpRef.current?.close()}><X size={20} /></button>
       <span className="about-mark"><AudioLines size={28} /></span><div className="eyebrow">MEET AURA</div>
-      <h2>声音里，藏着光。</h2><p>Aura 将语音中的情绪，化作一颗会呼吸的液态光球。</p>
+      <h2>声音里，藏着光。</h2><p>Aura 将语音中的情绪，化作会呼吸的液态光球，或 8 × 64 灯光矩阵。</p>
       <div className="about-step"><Headphones size={21} /><div><strong>自在地说</strong><span>允许麦克风，正常说话。每 2.5 秒更新一次转写与情绪，识别结果还需少量推理时间。</span></div></div>
-      <div className="about-step"><Sparkles size={21} /><div><strong>看见情绪</strong><span>颜色、形态与律动跟随语音情绪变化。你也可以在开麦前，轻点情绪按钮预览灯效。</span></div></div>
+      <div className="about-step"><Sparkles size={21} /><div><strong>看见情绪</strong><span>在液态光球与灯光矩阵之间自由切换，颜色与律动跟随语音情绪变化。你也可以在开麦前，轻点情绪按钮预览灯效。</span></div></div>
       <div className="about-step"><ShieldCheck size={21} /><div><strong>留在本地</strong><span>声音在本地 SenseVoice 模型处理，不上传云端，也不保存录音。转写仅在当前页面保留。</span></div></div>
       <p className="about-note">情绪标签是模型对当前声音片段的判断，仅用于演示。无法判断时会显示「待辨识」。</p>
       <button className="about-done" onClick={() => helpRef.current?.close()}>开始体验 <MoveUpRight size={16} /></button>

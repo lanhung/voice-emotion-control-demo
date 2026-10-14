@@ -1,6 +1,6 @@
 # Aura · 让情绪自然流动
 
-一个本地语音情绪可视化 Demo。打开麦克风后，页面上方的液态球体随语音情绪改变颜色、形态和运动速度，下方连续显示转写文字。浅色、留白、柔和虹彩与半透明控件组成整个界面。
+一个本地语音情绪可视化 Demo。打开麦克风后，页面上方的液态球体或 8 × 64 灯光矩阵随语音情绪改变颜色和律动，下方连续显示转写文字。浅色、留白、柔和虹彩与半透明控件组成整个界面。
 
 ## 启动
 
@@ -29,7 +29,8 @@ docker compose down               # 停止本 Demo
 ## 体验
 
 - 连续采集麦克风，每 **2.5 秒**提交一段音频，同时显示输入音量；实际结果在窗口结束后加上模型推理时间到达。
-- 根据 SenseVoice 原始声学情绪标签切换光球。音量仅影响起伏强度，文字内容不参与情绪推测。
+- 点击灯效上方的「液态光球 / 灯光矩阵」切换显示方式；矩阵为 **8 行 × 64 列，共 512 颗灯珠**，支持手机与沉浸模式。录音时也可切换，转写不中断。
+- 根据 SenseVoice 原始声学情绪标签切换灯效配色。音量影响光球起伏或矩阵光带的宽度与亮度，文字内容不参与情绪推测。矩阵遵循系统的减少动态效果设置，并在页面隐藏时暂停动画。
 - 平静、愉悦、低落、愤怒、惊讶、紧张、厌恶有不同配色与律动；模型没有给出明确标签时显示「待辨识」，不制造置信度。
 - 开麦前可点击情绪按钮预览。预览有明确标注，不伪造转写；开始录音后自动回到真实识别。
 - 支持沉浸模式（Esc 退出）、转写下载和清空。停止录音后会送出不足 2.5 秒的最后一段有效音频，再完成已有任务。
@@ -78,7 +79,7 @@ Node.js / Fastify / TypeScript
 SenseVoice 推理服务
   现有 model.py + 本地模型权重 → 原始文字 / 情绪 / 声音事件
               ↓
-React Three Fiber 液态球体 + 实时转写
+React Three Fiber 液态球体 / Canvas 2D 灯光矩阵 + 实时转写
 ```
 
 网站前后端、音频采集与测试代码使用 **TypeScript / TSX**，构建工具是 Vite，服务端使用 Fastify，图形使用 Three.js、React Three Fiber 和 Drei。没有手写 JavaScript 源文件；浏览器运行的 JavaScript 是正常的编译产物。
@@ -89,6 +90,7 @@ SenseVoice 本身依赖 Python / PyTorch，因此保留独立推理容器。[inf
 | --- | --- |
 | `src/App.tsx`、`src/styles.css` | 主页面与响应式样式 |
 | `src/components/LiquidOrb.tsx` | 液态形变、流动纹理与情绪配色过渡 |
+| `src/components/LightMatrix.tsx` | 8 × 64 灯珠矩阵、情绪流光与音量响应 |
 | `src/hooks/useVoice.ts` | 录音生命周期、静音过滤、队列与错误恢复 |
 | `src/audio/processor.ts`、`src/audio/wav.ts` | AudioWorklet、重采样与 WAV 编码 |
 | `shared/emotions.ts` | 情绪配置与共享类型 |
@@ -132,7 +134,7 @@ npx tsx scripts/prepare-test-audio.ts
 PLAYWRIGHT_BASE_URL=http://127.0.0.1:3000 npm run test:e2e
 ```
 
-也可以通过 `TEST_AUDIO_PATH=/absolute/path/example.wav` 提供测试音频。不提供样本时，真实语音转写测试会跳过。页面测试包含情绪预览、沉浸模式、权限失败、推理故障、录音停止、下载、清空与手机布局；截图输出到 `.artifacts/`。
+也可以通过 `TEST_AUDIO_PATH=/absolute/path/example.wav` 提供测试音频。不提供样本时，真实语音转写测试会跳过。页面测试包含情绪预览、光球与矩阵切换、矩阵实际像素配色、减少动态效果、录音中切换、沉浸模式、权限失败、推理故障、录音停止、下载、清空与手机布局；截图输出到 `.artifacts/`。
 
 ## API
 

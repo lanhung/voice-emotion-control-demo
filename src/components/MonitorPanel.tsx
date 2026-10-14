@@ -2,9 +2,10 @@ import { useEffect, useRef, useState } from 'react';
 import { Activity, ArrowDownToLine, ChevronDown, Mic, RefreshCw, Trash2 } from 'lucide-react';
 import type { useVoice } from '../hooks/useVoice';
 import { emotions, type Emotion } from '../../shared/emotions';
+import type { VisualizationMode } from './visualization';
 
-interface MonitorProps { voice: ReturnType<typeof useVoice>; health: string; displayEmotion: Emotion; preview: boolean }
-export default function MonitorPanel({ voice, health, displayEmotion, preview }: MonitorProps) {
+interface MonitorProps { voice: ReturnType<typeof useVoice>; health: string; displayEmotion: Emotion; preview: boolean; visualization: VisualizationMode }
+export default function MonitorPanel({ voice, health, displayEmotion, preview, visualization }: MonitorProps) {
   const [open, setOpen] = useState(true);
   const [filter, setFilter] = useState('all');
   const [follow, setFollow] = useState(true);
@@ -15,7 +16,9 @@ export default function MonitorPanel({ voice, health, displayEmotion, preview }:
     : filter === 'model' ? ['request', 'recognition', 'emotion'].some((prefix) => entry.event.startsWith(prefix))
     : entry.event.startsWith(filter))).slice(-120);
   const rendered = [...voice.events].reverse().find((entry) => entry.event === 'visual.applied');
-  const renderedCurrent = rendered?.details.emotion === displayEmotion;
+  const renderedCurrent = rendered?.details.emotion === displayEmotion
+    && (visualization === 'matrix' ? rendered?.details.renderer === 'canvas2d' : rendered?.details.renderer === 'webgl' || rendered?.details.renderer === 'css');
+  const rendererLabel = rendered?.details.renderer === 'canvas2d' ? '矩阵' : rendered?.details.renderer === 'css' ? '兼容' : 'WebGL';
   useEffect(() => {
     if (follow && logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight;
   }, [voice.events, follow, open, filter]);
@@ -60,7 +63,7 @@ export default function MonitorPanel({ voice, health, displayEmotion, preview }:
         <div><strong>{preview ? '正在预览灯效' : m.sameEmotionCount >= 2 ? `模型连续 ${m.sameEmotionCount} 段返回「${emotions[voice.emotion].label}」，主色保持不变` : last ? `最近模型标签：${last.emotionTag ?? '未知'} → ${emotions[last.emotion].label}` : '开麦后可检查模型判断与实际灯效是否一致'}</strong>
           <code data-testid="raw-tags">{last?.tags?.length ? last.tags.map((tag) => `<|${tag}|>`).join(' ') : '等待 SenseVoice 原始标签'}</code>
         </div>
-        <span className="render-color">{emotions[displayEmotion].color.toUpperCase()}<small>{renderedCurrent ? `${rendered?.details.renderer === 'css' ? '兼容' : 'WebGL'} 灯效已应用` : '等待渲染确认'}</small></span>
+        <span className="render-color">{emotions[displayEmotion].color.toUpperCase()}<small>{renderedCurrent ? `${rendererLabel} 灯效已应用` : '等待渲染确认'}</small></span>
       </div>
       <div className="monitor-log-toolbar">
         <label>事件日志 <select aria-label="日志筛选" value={filter} onChange={(event) => setFilter(event.target.value)}>

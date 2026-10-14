@@ -2,10 +2,10 @@ import { Component, Suspense, useEffect, useLayoutEffect, useMemo, useRef, useSt
 import { Canvas, useFrame } from '@react-three/fiber';
 import { Environment, Lightformer, MeshDistortMaterial } from '@react-three/drei';
 import { Color, MathUtils, type Mesh, type MeshPhysicalMaterial } from 'three';
-import { emotions, type Emotion } from '../../shared/emotions';
-import type { LogEvent } from '../../shared/monitoring';
+import { emotions } from '../../shared/emotions';
+import type { VisualizationProps } from './visualization';
 
-interface OrbProps { emotion: Emotion; level: number; active: boolean; reducedMotion: boolean; source: 'preview' | 'sensevoice' | 'idle'; onEvent: LogEvent }
+interface OrbProps extends VisualizationProps { reducedMotion: boolean }
 type LiquidMaterial = ComponentRef<typeof MeshDistortMaterial>;
 
 function Orb({ emotion, level, active, reducedMotion, source, onEvent }: OrbProps) {
@@ -116,7 +116,7 @@ class OrbBoundary extends Component<{ children: ReactNode; fallback: ReactNode }
   render() { return this.state.failed ? this.props.fallback : this.props.children; }
 }
 
-export default function LiquidOrb(props: Omit<OrbProps, 'reducedMotion'>) {
+export default function LiquidOrb(props: VisualizationProps) {
   const [reducedMotion, setReducedMotion] = useState(false);
   const [visible, setVisible] = useState(true);
   useEffect(() => {
