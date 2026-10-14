@@ -1,0 +1,37 @@
+name: aura-voice-demo
+services:
+  web:
+    build: .
+    ports:
+      - "${APP_BIND:-0.0.0.0}:${APP_PORT:-3000}:3000"
+    environment:
+      SENSEVOICE_URL: http://sensevoice:50000
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      LOG_TRANSCRIPTS: ${LOG_TRANSCRIPTS:-false}
+    depends_on:
+      sensevoice:
+        condition: service_healthy
+    restart: unless-stopped
+    init: true
+    logging:
+      options: { max-size: "5m", max-file: "2" }
+  sensevoice:
+    build:
+      context: .
+      dockerfile: docker/sensevoice.Dockerfile
+      additional_contexts:
+        sensevoice_source: ${SENSEVOICE_SOURCE:-/home/zxc/workspace3/code/SenseVoice}
+    volumes:
+      - type: bind
+        source: ${SENSEVOICE_MODEL_PATH:-/home/zxc/.cache/modelscope/models/iic--SenseVoiceSmall/snapshots/master}
+        target: /models
+        read_only: true
+        bind:
+          create_host_path: false
+    environment:
+      INFERENCE_THREADS: ${INFERENCE_THREADS:-4}
+      LOG_TRANSCRIPTS: ${LOG_TRANSCRIPTS:-false}
+    restart: unless-stopped
+    init: true
+    logging:
+      options: { max-size: "5m", max-file: "2" }

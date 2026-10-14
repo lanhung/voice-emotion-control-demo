@@ -1,0 +1,5 @@
+# Expose only the inference service for npm run dev on the host.
+services:
+  sensevoice:
+    ports:
+      - "127.0.0.1:50000:50000"
