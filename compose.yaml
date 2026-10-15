@@ -11,7 +11,7 @@ services:
     depends_on:
       sensevoice:
         condition: service_healthy
-    restart: unless-stopped
+    restart: "no"
     init: true
     logging:
       options: { max-size: "5m", max-file: "2" }
@@ -31,7 +31,7 @@ services:
     environment:
       INFERENCE_THREADS: ${INFERENCE_THREADS:-4}
       LOG_TRANSCRIPTS: ${LOG_TRANSCRIPTS:-false}
-    restart: unless-stopped
+    restart: "no"
     init: true
     logging:
       options: { max-size: "5m", max-file: "2" }
