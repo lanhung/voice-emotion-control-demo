@@ -6,8 +6,10 @@ import { randomUUID } from 'node:crypto';
 import { recognize, wavDuration } from './sensevoice';
 import type { HealthResponse } from '../shared/emotions';
 import { measureSignal } from '../shared/monitoring';
+import { registerReactionRoutes } from './reactionRoutes';
+import type { LlmConfig } from './llm';
 
-interface AppOptions { sensevoiceUrl?: string; logger?: boolean; staticDir?: string }
+interface AppOptions { sensevoiceUrl?: string; logger?: boolean; staticDir?: string; llmConfig?: LlmConfig | null }
 
 export async function buildApp(options: AppOptions = {}) {
   const app = Fastify({ logger: options.logger === false ? false : { level: process.env.LOG_LEVEL ?? 'info' },
@@ -33,8 +35,8 @@ export async function buildApp(options: AppOptions = {}) {
           ['http://localhost:5173', 'http://127.0.0.1:5173'].includes(parsed.origin));
       } catch { /* reject below */ }
       if (!valid) {
-        request.log.warn({ event: 'request.rejected', reason: 'cross_origin' }, 'Rejected cross-origin audio');
-        return reply.code(403).send({ error: '不接受跨站音频请求。' });
+        request.log.warn({ event: 'request.rejected', reason: 'cross_origin' }, 'Rejected cross-origin request');
+        return reply.code(403).send({ error: '不接受跨站请求。' });
       }
     }
   });
@@ -108,6 +110,8 @@ export async function buildApp(options: AppOptions = {}) {
       reply.raw.removeListener('close', onClose);
     }
   });
+
+  registerReactionRoutes(app, options.llmConfig);
 
   const root = options.staticDir ?? resolve('dist/client');
   if (existsSync(root)) {

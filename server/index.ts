@@ -1,5 +1,8 @@
 import { buildApp } from './app';
+import { existsSync } from 'node:fs';
+import { loadEnvFile } from 'node:process';
 
+if (existsSync('.env')) loadEnvFile('.env');
 const app = await buildApp();
 const port = Number(process.env.PORT ?? (process.env.NODE_ENV === 'production' ? 3000 : 3001));
 await app.listen({ port, host: process.env.HOST ?? '0.0.0.0' });

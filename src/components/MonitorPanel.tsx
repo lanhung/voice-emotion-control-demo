@@ -15,9 +15,12 @@ export default function MonitorPanel({ voice, health, displayEmotion, preview, v
   const filtered = voice.events.filter((entry) => filter === 'all' || (filter === 'errors' ? entry.level !== 'info'
     : filter === 'model' ? ['request', 'recognition', 'emotion'].some((prefix) => entry.event.startsWith(prefix))
     : entry.event.startsWith(filter))).slice(-120);
-  const rendered = [...voice.events].reverse().find((entry) => entry.event === 'visual.applied');
+  const reactionText = voice.reaction.enabled && voice.reaction.state.status === 'replied' ? voice.reaction.state.text : null;
+  const rendered = [...voice.events].reverse().find((entry) => reactionText
+    ? entry.event === 'visual.reply_applied' && entry.details.text === reactionText : entry.event === 'visual.applied');
   const renderedCurrent = rendered?.details.emotion === displayEmotion
-    && (visualization === 'matrix' ? rendered?.details.renderer === 'canvas2d' : rendered?.details.renderer === 'webgl' || rendered?.details.renderer === 'css');
+    && (reactionText ? rendered?.details.renderer === (visualization === 'matrix' ? 'matrix-text' : 'liquid-text')
+      : visualization === 'matrix' ? rendered?.details.renderer === 'canvas2d' : rendered?.details.renderer === 'webgl' || rendered?.details.renderer === 'css');
   const rendererLabel = rendered?.details.renderer === 'canvas2d' ? '矩阵' : rendered?.details.renderer === 'css' ? '兼容' : 'WebGL';
   useEffect(() => {
     if (follow && logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight;
@@ -63,11 +66,11 @@ export default function MonitorPanel({ voice, health, displayEmotion, preview, v
         <div><strong>{preview ? '正在预览灯效' : m.sameEmotionCount >= 2 ? `模型连续 ${m.sameEmotionCount} 段返回「${emotions[voice.emotion].label}」，主色保持不变` : last ? `最近模型标签：${last.emotionTag ?? '未知'} → ${emotions[last.emotion].label}` : '开麦后可检查模型判断与实际灯效是否一致'}</strong>
           <code data-testid="raw-tags">{last?.tags?.length ? last.tags.map((tag) => `<|${tag}|>`).join(' ') : '等待 SenseVoice 原始标签'}</code>
         </div>
-        <span className="render-color">{emotions[displayEmotion].color.toUpperCase()}<small>{renderedCurrent ? `${rendererLabel} 灯效已应用` : '等待渲染确认'}</small></span>
+        <span className="render-color">{emotions[displayEmotion].color.toUpperCase()}<small>{renderedCurrent ? reactionText ? '短回应文字已显示' : `${rendererLabel} 灯效已应用` : '等待渲染确认'}</small></span>
       </div>
       <div className="monitor-log-toolbar">
         <label>事件日志 <select aria-label="日志筛选" value={filter} onChange={(event) => setFilter(event.target.value)}>
-          <option value="all">全部事件</option><option value="errors">警告与错误</option><option value="model">识别与情绪</option><option value="audio">音频采集</option><option value="visual">灯效变化</option>
+          <option value="all">全部事件</option><option value="errors">警告与错误</option><option value="model">识别与情绪</option><option value="reaction">短回应</option><option value="audio">音频采集</option><option value="visual">灯效变化</option>
         </select></label>
         <label><input type="checkbox" checked={follow} onChange={(event) => setFollow(event.target.checked)} />自动滚动</label>
       </div>

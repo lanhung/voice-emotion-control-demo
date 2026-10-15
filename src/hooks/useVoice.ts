@@ -4,6 +4,7 @@ import { encodeWav, resample } from '../audio/wav';
 import { emotions, type AnalysisResult, type Emotion, type TranscriptEntry } from '../../shared/emotions';
 import { emptyMetrics, measureSignal, toDbfs, type InputDeviceInfo, type VoiceMetrics } from '../../shared/monitoring';
 import { useMonitor } from './useMonitor';
+import { useReaction } from './useReaction';
 
 type Phase = 'idle' | 'requesting' | 'listening' | 'finishing';
 type AudioMessage = { type: 'level'; rms: number; peak: number }
@@ -24,6 +25,8 @@ function microphoneError(error: unknown): string {
 
 export function useVoice() {
   const { events, log, clearLogs, exportLogs, sessionIdRef } = useMonitor();
+  const reaction = useReaction(log);
+  const { begin: beginReaction, append: appendReaction, complete: completeReaction, reset: resetReaction } = reaction;
   const [phase, setPhase] = useState<Phase>('idle');
   const [entries, setEntries] = useState<TranscriptEntry[]>([]);
   const [emotion, setEmotion] = useState<Emotion>('neutral');
@@ -89,11 +92,12 @@ export function useVoice() {
 
   const fail = useCallback((message: string, details: Record<string, unknown> = {}) => {
     log('session.error', message, details, 'error');
+    resetReaction();
     sessionRef.current++;
     abortRef.current?.abort(); queueRef.current = []; processingRef.current = null;
     updateMetrics({ queued: 0 }); flushRef.current?.(); flushRef.current = null;
     void release(); setError(message); setProcessing(false); updatePhase('idle');
-  }, [log, release, updateMetrics, updatePhase]);
+  }, [log, release, resetReaction, updateMetrics, updatePhase]);
 
   const pump = useCallback((session: number) => {
     if (processingRef.current) return;
@@ -120,6 +124,7 @@ export function useVoice() {
           }
           const result = await response.json() as AnalysisResult;
           if (session !== sessionRef.current) return;
+          appendReaction(sessionIdRef.current!, result);
           const roundTripMs = Math.round(performance.now() - sentAt);
           setLatency(result.latencyMs); setLastResult(result);
           updateMetrics({ completed: metricsRef.current.completed + 1, lastSequence: chunk.sequence, roundTripMs });
@@ -154,7 +159,7 @@ export function useVoice() {
       }
     };
     processingRef.current = task();
-  }, [fail, log, sessionIdRef, updateMetrics]);
+  }, [appendReaction, fail, log, sessionIdRef, updateMetrics]);
 
   const start = useCallback(async () => {
     if (phaseRef.current !== 'idle') return;
@@ -165,6 +170,7 @@ export function useVoice() {
     }
     const session = ++sessionRef.current;
     sessionIdRef.current = crypto.randomUUID(); updateMetrics(emptyMetrics()); setLastResult(null);
+    beginReaction(sessionIdRef.current);
     log('session.started', '开始真实麦克风采集', { intervalMs: 2500, thresholdDb: thresholdRef.current, skipSilence: skipSilenceRef.current, autoGainControl: autoGain, secureContext: window.isSecureContext });
     updatePhase('requesting'); setQuiet(false); setElapsed(0); setLevels(Array(38).fill(0));
     let context: AudioContext | undefined;
@@ -257,7 +263,7 @@ export function useVoice() {
       if (context && context.state !== 'closed') await context.close().catch(() => undefined);
       if (session === sessionRef.current) fail(microphoneError(err), { errorType: err instanceof Error ? err.name : 'Unknown' });
     }
-  }, [autoGain, fail, log, pump, refreshDevices, selectedDeviceId, sessionIdRef, updateMetrics, updatePhase]);
+  }, [autoGain, beginReaction, fail, log, pump, refreshDevices, selectedDeviceId, sessionIdRef, updateMetrics, updatePhase]);
 
   const stop = useCallback(async () => {
     if (phaseRef.current === 'requesting') { fail('已取消麦克风连接。'); return; }
@@ -268,13 +274,19 @@ export function useVoice() {
     capture?.stream.getTracks().forEach((track) => { track.onended = null; track.stop(); });
     if (capture) {
       await new Promise<void>((resolve) => {
-        const timer = setTimeout(() => { log('audio.flush_timeout', '音频处理器未及时确认最后一段', {}, 'warn'); flushRef.current = null; resolve(); }, 350);
+        const timer = setTimeout(() => {
+          log('audio.flush_timeout', '音频处理器未及时确认最后一段，取消待处理的短回应', {}, 'warn');
+          resetReaction(); flushRef.current = null; resolve();
+        }, 350);
         flushRef.current = () => { clearTimeout(timer); resolve(); }; capture.node.port.postMessage('flush');
       });
     }
     await release(); await processingRef.current;
-    if (session === sessionRef.current) { updatePhase('idle'); log('session.completed', '本次录音处理完成', { ...metricsRef.current }); }
-  }, [fail, log, release, updatePhase]);
+    if (session === sessionRef.current) {
+      updatePhase('idle'); log('session.completed', '本次录音处理完成', { ...metricsRef.current });
+      completeReaction(sessionIdRef.current!);
+    }
+  }, [completeReaction, fail, log, release, resetReaction, sessionIdRef, updatePhase]);
 
   useEffect(() => {
     void refreshDevices(); navigator.mediaDevices?.addEventListener('devicechange', refreshDevices);
@@ -282,10 +294,10 @@ export function useVoice() {
   }, [refreshDevices]);
   useEffect(() => () => { sessionRef.current++; abortRef.current?.abort(); queueRef.current = []; void release(); }, [release]);
 
-  return { phase, entries, emotion, error, level, levels, elapsed, processing, latency, quiet, start, stop,
+  return { phase, entries, emotion, error, level, levels, elapsed, processing, latency, quiet, start, stop, reaction,
     events, log, clearLogs, exportLogs, signal, metrics, inputInfo, lastResult, sessionId: sessionIdRef.current,
     devices, selectedDeviceId, setSelectedDeviceId, autoGain, setAutoGain, refreshDevices, thresholdDb, skipSilence,
     setThresholdDb: (value: number) => { thresholdRef.current = value; setThresholdDbState(value); log('settings.threshold', `静音门限调整为 ${value} dBFS`, { thresholdDb: value }); },
     setSkipSilence: (value: boolean) => { skipSilenceRef.current = value; setSkipSilenceState(value); log('settings.silence', value ? '开启静音过滤' : '关闭静音过滤，每段都送入模型', { skipSilence: value }); },
-    clear: () => { setEntries([]); setLatency(null); log('transcript.cleared', '已清空页面转写记录'); }, dismissError: () => setError(null) };
+    clear: () => { resetReaction(); setEntries([]); setLatency(null); log('transcript.cleared', '已清空页面转写记录'); }, dismissError: () => setError(null) };
 }

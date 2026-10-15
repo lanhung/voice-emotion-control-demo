@@ -1,17 +1,17 @@
-import { useEffect, useLayoutEffect, useRef } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef } from 'react';
 import { emotions } from '../../shared/emotions';
 import type { VisualizationProps } from './visualization';
+import { layoutMatrixText, MATRIX_ROWS as ROWS, MATRIX_COLUMNS as COLUMNS } from '../visualization/matrixText';
 
-const ROWS = 8;
-const COLUMNS = 64;
 const rgb = (hex: string) => [1, 3, 5].map((offset) => parseInt(hex.slice(offset, offset + 2), 16));
 
-export default function LightMatrix({ emotion, level, active, source, onEvent }: VisualizationProps) {
+export default function LightMatrix({ emotion, level, active, source, onEvent, reactionText }: VisualizationProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const input = useRef({ level, active });
   const colors = useRef([emotions.neutral.color, emotions.neutral.secondary, emotions.neutral.accent].map(rgb));
   const phase = useRef(0);
   const palette = emotions[emotion];
+  const lettering = useMemo(() => reactionText ? layoutMatrixText(reactionText) : null, [reactionText]);
 
   useLayoutEffect(() => { input.current = { level, active }; }, [level, active]);
 
@@ -56,11 +56,14 @@ export default function LightMatrix({ emotion, level, active, source, onEvent }:
         for (let row = 0; row < ROWS; row++) {
           const distance = (row - center) / (1.3 + energy * 1.3);
           const pulse = 0.78 + Math.sin(column * 0.19 + time * 1.2) * 0.16;
-          const brightness = Math.min(1, 0.1 + Math.exp(-distance * distance * 0.5) * (pulse + energy * 0.3));
+          const lit = lettering?.pixels[row * COLUMNS + column];
+          const brightness = lettering ? (lit ? 1 : 0.015)
+            : Math.min(1, 0.1 + Math.exp(-distance * distance * 0.5) * (pulse + energy * 0.3));
           const secondary = (Math.sin(column * 0.1 + row * 0.45 - time * 0.4) + 1) * 0.24;
           const accent = (Math.cos(column * 0.16 - row * 0.5 + time * 0.6) + 1) * 0.12;
-          const tint = colors.current[0].map((channel, index) => Math.round(
-            channel * (1 - secondary - accent) + colors.current[1][index] * secondary + colors.current[2][index] * accent,
+          const tint = colors.current[0].map((channel, index) => Math.round(lettering
+            ? channel * 0.65 + 255 * 0.35
+            : channel * (1 - secondary - accent) + colors.current[1][index] * secondary + colors.current[2][index] * accent,
           )).join(',');
           const x = (column + 0.5) * cell;
           const y = (row + 0.5) * cell;
@@ -71,7 +74,7 @@ export default function LightMatrix({ emotion, level, active, source, onEvent }:
           context.fillRect(x - cell, y - cell, cell * 2, cell * 2);
           context.beginPath();
           context.arc(x, y, cell * 0.27, 0, Math.PI * 2);
-          context.fillStyle = `rgba(${tint},${0.12 + brightness * 0.88})`;
+          context.fillStyle = `rgba(${tint},${lettering ? brightness : 0.12 + brightness * 0.88})`;
           context.fill();
         }
       }
@@ -81,6 +84,9 @@ export default function LightMatrix({ emotion, level, active, source, onEvent }:
         onEvent('visual.applied', `矩阵主色已生效：${palette.label} ${palette.color.toUpperCase()}`, {
           source, emotion, color: palette.color, renderer: 'canvas2d', rows: ROWS, columns: COLUMNS,
           transitionMs: Math.round(now - started), colorError: colorError / 255,
+        });
+        if (reactionText) onEvent('visual.reply_applied', `矩阵文字已显示：${reactionText}`, {
+          source, emotion, text: reactionText, color: palette.color, renderer: 'matrix-text', rows: ROWS, columns: COLUMNS,
         });
       }
     };
@@ -113,12 +119,12 @@ export default function LightMatrix({ emotion, level, active, source, onEvent }:
       motion.removeEventListener('change', refresh);
       document.removeEventListener('visibilitychange', refresh);
     };
-  }, [emotion, onEvent, palette, source]);
+  }, [emotion, onEvent, palette, source, lettering, reactionText]);
 
-  return <div className="light-matrix" role="img" aria-label={`${palette.label}情绪的 8 行 64 列灯光矩阵`}>
+  return <div className="light-matrix" role="img" aria-label={reactionText ? `灯光矩阵回应：${reactionText}` : `${palette.label}情绪的 8 行 64 列灯光矩阵`}>
     <div className="matrix-frame">
-      <canvas ref={canvasRef} width={1280} height={160} data-rows={ROWS} data-columns={COLUMNS} aria-hidden="true" />
+      <canvas ref={canvasRef} width={1280} height={160} data-rows={ROWS} data-columns={COLUMNS} data-text={reactionText ?? undefined} aria-hidden="true" />
     </div>
-    <div className="matrix-caption" aria-hidden="true"><span>8 × 64<span className="matrix-caption-dot">·</span>512 颗灯珠</span><span>{source === 'preview' ? '情绪灯效预览' : active ? '情绪流光 · 随声律动' : '情绪流光 · 静候声音'}</span></div>
+    <div className="matrix-caption" aria-hidden="true"><span>8 × 64<span className="matrix-caption-dot">·</span>512 颗灯珠</span><span>{reactionText ? '此刻，回应你' : source === 'preview' ? '情绪灯效预览' : active ? '情绪流光 · 随声律动' : '情绪流光 · 静候声音'}</span></div>
   </div>;
 }

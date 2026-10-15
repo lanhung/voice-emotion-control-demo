@@ -8,6 +8,12 @@ services:
       SENSEVOICE_URL: http://sensevoice:50000
       LOG_LEVEL: ${LOG_LEVEL:-info}
       LOG_TRANSCRIPTS: ${LOG_TRANSCRIPTS:-false}
+      LLM_BASE_URL: ${LLM_DOCKER_BASE_URL:-http://host.docker.internal:8317/v1}
+      LLM_MODEL: ${LLM_MODEL:-gpt-6-luna}
+      LLM_API_KEY: ${LLM_API_KEY:-}
+      LLM_TIMEOUT_MS: ${LLM_TIMEOUT_MS:-10000}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       sensevoice:
         condition: service_healthy

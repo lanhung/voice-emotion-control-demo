@@ -4,6 +4,7 @@ import { Environment, Lightformer, MeshDistortMaterial } from '@react-three/drei
 import { Color, MathUtils, type Mesh, type MeshPhysicalMaterial } from 'three';
 import { emotions } from '../../shared/emotions';
 import type { VisualizationProps } from './visualization';
+import LiquidReply from './LiquidReply';
 
 interface OrbProps extends VisualizationProps { reducedMotion: boolean }
 type LiquidMaterial = ComponentRef<typeof MeshDistortMaterial>;
@@ -126,14 +127,19 @@ export default function LiquidOrb(props: VisualizationProps) {
     change(); media.addEventListener('change', change); document.addEventListener('visibilitychange', visibility);
     return () => { media.removeEventListener('change', change); document.removeEventListener('visibilitychange', visibility); };
   }, []);
-  return <div className="orb-canvas" role="img" aria-label={`${emotions[props.emotion].label}情绪的液态光球`}>
+  return <div className={`orb-canvas ${props.reactionText ? 'is-replying' : ''}`} role="img"
+    aria-label={props.reactionText ? `液态光球回应：${props.reactionText}` : `${emotions[props.emotion].label}情绪的液态光球`}>
+    <div className="orb-surface" aria-hidden="true">
     <OrbBoundary fallback={<MonitoredFallback {...props} />}>
       <Suspense fallback={<FallbackOrb />}>
-        <Canvas camera={{ position: [0, 0, 5.6], fov: 40 }} dpr={[1, 1.75]} frameloop={visible ? 'always' : 'never'}
-          gl={{ alpha: true, antialias: true, powerPreference: 'low-power' }} fallback={<MonitoredFallback {...props} />}>
+        <Canvas camera={{ position: [0, 0, 5.6], fov: 40 }} dpr={[1, 1.75]} frameloop={visible && !props.reactionText ? 'always' : 'never'}
+          gl={{ alpha: true, antialias: true, powerPreference: 'low-power' }} fallback={<FallbackOrb />}>
           <Orb {...props} reducedMotion={reducedMotion} />
         </Canvas>
       </Suspense>
     </OrbBoundary>
+    </div>
+    {props.reactionText && <LiquidReply key={props.reactionText} text={props.reactionText} emotion={props.emotion}
+      source={props.source} onEvent={props.onEvent} reducedMotion={reducedMotion} visible={visible} />}
   </div>;
 }

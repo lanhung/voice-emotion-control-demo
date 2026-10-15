@@ -6,6 +6,7 @@ import { useVoice } from './hooks/useVoice';
 import { useHealth } from './hooks/useHealth';
 import MonitorPanel, { MicrophoneSelector } from './components/MonitorPanel';
 import LightMatrix from './components/LightMatrix';
+import ReactionBadge from './components/ReactionBadge';
 import type { VisualizationMode, VisualizationProps } from './components/visualization';
 
 const LiquidOrb = lazy(() => import('./components/LiquidOrb'));
@@ -29,8 +30,9 @@ export default function App() {
   const language = lastEntry?.language ? ({ zh: '中文', en: '英语', yue: '粤语', ja: '日语', ko: '韩语' }[lastEntry.language] ?? lastEntry.language) : '自动识别';
   const variables = { '--emotion-color': palette.color, '--emotion-secondary': palette.secondary, '--emotion-accent': palette.accent } as CSSProperties;
   const log = voice.log;
+  const reactionText = voice.reaction.enabled && voice.reaction.state.status === 'replied' ? voice.reaction.state.text : null;
   const visualProps: VisualizationProps = { emotion, level: voice.level, active: listening || preview !== null,
-    source: preview ? 'preview' : voice.lastResult ? 'sensevoice' : 'idle', onEvent: log };
+    source: preview ? 'preview' : voice.lastResult ? 'sensevoice' : 'idle', onEvent: log, reactionText };
   const changeVisualization = (mode: VisualizationMode) => {
     if (mode === visualization) return;
     setVisualization(mode);
@@ -88,11 +90,11 @@ export default function App() {
           <button type="button" aria-pressed={visualization === 'matrix'} onClick={() => changeVisualization('matrix')}><Grid3X3 size={13} />灯光矩阵 <span>8 × 64</span></button>
         </div>
 
-        <div className={`orb-stage ${visualization === 'matrix' ? 'matrix-stage' : ''}`}>
+        <div className={`orb-stage ${visualization === 'matrix' ? 'matrix-stage' : ''} ${reactionText ? 'has-reaction' : ''}`}>
           <div className="orb-ambient" aria-hidden="true" />
           <div className="orbit orbit-one" aria-hidden="true" />
           <div className="orbit orbit-two" aria-hidden="true" />
-          <div className="stage-note"><span className={`live-indicator ${listening ? 'on' : ''}`} />{preview ? '灯效预览' : listening ? '正在聆听' : voice.phase === 'finishing' ? '正在完成识别' : '等待你的声音'}</div>
+          <div className="stage-note"><span className={`live-indicator ${listening ? 'on' : ''}`} />{reactionText ? '此刻，回应你' : preview ? '灯效预览' : listening ? '正在聆听' : voice.phase === 'finishing' ? '正在完成识别' : '等待你的声音'}</div>
           <button className="icon-button expand-button" aria-label={immersive ? '退出沉浸模式' : '进入沉浸模式'} title="沉浸模式" onClick={() => setImmersive(!immersive)}>
             {immersive ? <Minimize size={17} /> : <Expand size={17} />}
           </button>
@@ -104,7 +106,7 @@ export default function App() {
             <span className="emotion-dot" />
             <span>{palette.label}</span><span className="emotion-english">{palette.english}</span>
           </div>
-          <div className="orb-caption">{preview ? `${palette.description} · 效果预览` : palette.description}</div>
+          <div className="orb-caption">{reactionText ? '让这一刻的心情，化作一句回应' : preview ? `${palette.description} · 效果预览` : palette.description}</div>
         </div>
 
         <div className="voice-controls">
@@ -124,6 +126,11 @@ export default function App() {
           <p className="recording-hint">
             {listening ? <><span className="hint-live-dot" />{voice.quiet ? '正在等你开口，静音片段不会识别' : voice.processing ? '正在理解你的声音…' : '自在地说，每 2.5 秒感受一次情绪'}</> : <><ShieldCheck size={13} />声音仅在本机处理，不保存录音</>}
           </p>
+          <div className="reaction-settings">
+            <label><input type="checkbox" checked={voice.reaction.enabled} aria-describedby="reaction-description"
+              onChange={(event) => voice.reaction.setEnabled(event.target.checked)} />短回应<span>1–2 个英文词</span></label>
+            <p id="reaction-description">开启后，识别到语音便自动回应，无需结束聆听。仅将最近的文字与情绪线索发送给配置的模型服务；是否传至云端取决于代理配置。回复内容可在监控日志的「短回应」中查看。</p>
+          </div>
         </div>
 
         {voice.error && <div className="error-banner" role="alert"><span>{voice.error}</span><button className="icon-button" aria-label="关闭提示" onClick={voice.dismissError}><X size={16} /></button></div>}
@@ -172,13 +179,15 @@ export default function App() {
       <footer className="site-footer"><span>A little voice. A world of feeling.</span><span><Cpu size={13} /> SenseVoice<span className="footer-dot">/</span>本地驱动<ArrowUpRight size={12} /></span></footer>
     </main>
 
+    <ReactionBadge state={voice.reaction.state} enabled={voice.reaction.enabled} />
+
     <dialog ref={helpRef} className="about-dialog" onClick={(event) => { if (event.target === helpRef.current) helpRef.current.close(); }}>
       <button className="icon-button dialog-close" aria-label="关闭介绍" onClick={() => helpRef.current?.close()}><X size={20} /></button>
       <span className="about-mark"><AudioLines size={28} /></span><div className="eyebrow">MEET AURA</div>
       <h2>声音里，藏着光。</h2><p>Aura 将语音中的情绪，化作会呼吸的液态光球，或 8 × 64 灯光矩阵。</p>
       <div className="about-step"><Headphones size={21} /><div><strong>自在地说</strong><span>允许麦克风，正常说话。每 2.5 秒更新一次转写与情绪，识别结果还需少量推理时间。</span></div></div>
       <div className="about-step"><Sparkles size={21} /><div><strong>看见情绪</strong><span>在液态光球与灯光矩阵之间自由切换，颜色与律动跟随语音情绪变化。你也可以在开麦前，轻点情绪按钮预览灯效。</span></div></div>
-      <div className="about-step"><ShieldCheck size={21} /><div><strong>留在本地</strong><span>声音在本地 SenseVoice 模型处理，不上传云端，也不保存录音。转写仅在当前页面保留。</span></div></div>
+      <div className="about-step"><ShieldCheck size={21} /><div><strong>本地处理声音</strong><span>声音在本地 SenseVoice 模型处理，不保存录音。开启「短回应」后，本轮文字与情绪线索会发送给配置的模型服务，是否传至云端取决于代理配置。</span></div></div>
       <p className="about-note">情绪标签是模型对当前声音片段的判断，仅用于演示。无法判断时会显示「待辨识」。</p>
       <button className="about-done" onClick={() => helpRef.current?.close()}>开始体验 <MoveUpRight size={16} /></button>
     </dialog>
