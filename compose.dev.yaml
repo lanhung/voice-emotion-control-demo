@@ -1,5 +1,8 @@
-# Expose only the inference service for npm run dev on the host.
+# Expose model services only to the host for npm run dev.
 services:
   sensevoice:
     ports:
       - "127.0.0.1:50000:50000"
+  ollama:
+    ports:
+      - "127.0.0.1:${OLLAMA_DEV_PORT:-11435}:11434"

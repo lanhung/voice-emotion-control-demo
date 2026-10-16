@@ -15,7 +15,7 @@ const configSchema = z.object({
   model: z.string().trim().min(1), timeoutMs: z.coerce.number().int().min(1000).max(10_000),
 });
 export function readLayaConfig(env: NodeJS.ProcessEnv = process.env): LayaConfig | null {
-  const result = configSchema.safeParse({ host: env.OLLAMA_BASE_URL ?? 'http://127.0.0.1:11434',
+  const result = configSchema.safeParse({ host: env.OLLAMA_BASE_URL ?? 'http://127.0.0.1:11435',
     model: env.LAYA_MODEL ?? DEFAULT_LAYA_MODEL, timeoutMs: env.LAYA_TIMEOUT_MS ?? 5000 });
   return result.success ? result.data : null;
 }

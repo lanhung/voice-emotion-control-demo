@@ -1,7 +1,7 @@
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, writeFileSync } from 'node:fs';
 
-// Reuse the public sample bundled with the locally downloaded SenseVoice model.
+// Reuse the public sample bundled in the SenseVoice image.
 // No user recording is used, and no binary fixture is checked into the project.
 const audio = execFileSync('docker', ['compose', 'exec', '-T', 'sensevoice', 'python', '-c', `
 import io, math, sys, wave

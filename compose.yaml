@@ -1,6 +1,8 @@
 name: aura-voice-demo
+
 services:
   web:
+    image: aura-voice-demo-web:local
     build: .
     ports:
       - "${APP_BIND:-0.0.0.0}:${APP_PORT:-3000}:3000"
@@ -10,18 +12,18 @@ services:
       LOG_TRANSCRIPTS: ${LOG_TRANSCRIPTS:-false}
       HTTPS_CERT_FILE: ${HTTPS_CERT_FILE:-}
       HTTPS_KEY_FILE: ${HTTPS_KEY_FILE:-}
-      OLLAMA_BASE_URL: ${OLLAMA_DOCKER_BASE_URL:-http://host.docker.internal:11434}
+      OLLAMA_BASE_URL: http://ollama:11434
       LAYA_MODEL: ${LAYA_MODEL:-laya:322m-multilingual-mlx-fp16}
       LAYA_TIMEOUT_MS: ${LAYA_TIMEOUT_MS:-5000}
       REACTION_CATALOG_PATH: ${REACTION_CATALOG_PATH:-config/reaction-phrases.csv}
     volumes:
       - ./config:/app/config:ro
       - ./certs:/app/certs:ro
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
     depends_on:
       sensevoice:
         condition: service_healthy
+      ollama-init:
+        condition: service_completed_successfully
     restart: "no"
     init: true
     logging:
@@ -30,15 +32,6 @@ services:
     build:
       context: .
       dockerfile: docker/sensevoice.Dockerfile
-      additional_contexts:
-        sensevoice_source: ${SENSEVOICE_SOURCE:-/home/zxc/workspace3/code/SenseVoice}
-    volumes:
-      - type: bind
-        source: ${SENSEVOICE_MODEL_PATH:-/home/zxc/.cache/modelscope/models/iic--SenseVoiceSmall/snapshots/master}
-        target: /models
-        read_only: true
-        bind:
-          create_host_path: false
     environment:
       INFERENCE_THREADS: ${INFERENCE_THREADS:-4}
       LOG_TRANSCRIPTS: ${LOG_TRANSCRIPTS:-false}
@@ -46,3 +39,45 @@ services:
     init: true
     logging:
       options: { max-size: "5m", max-file: "2" }
+
+  ollama:
+    image: ollama/ollama:0.40.1@sha256:69f27594d8127cb43db1edcafa5e2d3cd8f88bdbc54a2cf3ceb11b8d138a24b1
+    # This Laya checkpoint uses the image's MLX CUDA runtime, not its CPU backend.
+    gpus: all
+    environment:
+      OLLAMA_HOST: 0.0.0.0:11434
+      OLLAMA_NO_CLOUD: "true"
+      OLLAMA_KEEP_ALIVE: "-1"
+      # Use the system Fortran runtime instead of the incompatible bundled copy.
+      LD_PRELOAD: /lib/x86_64-linux-gnu/libgfortran.so.5
+    volumes:
+      - ollama-data:/root/.ollama
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 5s
+      timeout: 5s
+      start_period: 10s
+      retries: 12
+    restart: "no"
+    logging:
+      options: { max-size: "5m", max-file: "2" }
+
+  ollama-init:
+    image: aura-voice-demo-web:local
+    build: .
+    environment:
+      OLLAMA_BASE_URL: http://ollama:11434
+      LAYA_MODEL: ${LAYA_MODEL:-laya:322m-multilingual-mlx-fp16}
+    depends_on:
+      ollama:
+        condition: service_healthy
+    command: ["node", "dist/server/prepareModels.js"]
+    healthcheck:
+      disable: true
+    init: true
+    restart: "no"
+    logging:
+      options: { max-size: "5m", max-file: "2" }
+
+volumes:
+  ollama-data:

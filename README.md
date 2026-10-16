@@ -4,25 +4,38 @@
 
 ## 启动
 
-本机默认配置已指向现有 SenseVoice 源码及已下载的模型：
+复制或克隆当前工程到目标电脑，在工程目录执行一条命令即可构建并启动。无需安装 Node.js、Python、SenseVoice 或独立 Ollama，也无需复制其他工程目录。
 
-- 源码：`/home/zxc/workspace3/code/SenseVoice`
-- 模型：`/home/zxc/.cache/modelscope/models/iic--SenseVoiceSmall/snapshots/master`
+**当前完整功能的硬件要求：** x86_64 电脑、Docker Compose v2.30+、支持 CUDA 13 的 NVIDIA GPU/驱动，以及可用的 Docker GPU 访问（Linux 使用 [NVIDIA Container Toolkit](https://docs.ollama.com/docker)，Windows 使用支持 GPU 的 Docker Desktop / WSL2 环境）。SenseVoice 使用 CPU；当前 `laya:322m-multilingual-mlx-fp16` 依赖 Ollama 镜像内的 MLX CUDA 运行库。纯 CPU、AMD GPU 和 Apple Silicon Mac 不能直接使用这份完整部署配置；普通 Ollama 的 CPU 支持不代表该 Laya 模型也能运行。
 
 ```bash
 docker compose up -d --build
 ```
 
-打开 **http://localhost:3000**，点击「开始聆听」并允许麦克风。首次构建需要下载 Node 与 PyTorch 依赖；模型权重直接使用本地文件，无需再次下载。模型就绪后网站容器才启动。
+打开 **http://localhost:3000**，点击「开始聆听」并允许麦克风。默认无需 `.env`；如需改端口或 HTTPS，可复制 `.env.example` 为 `.env` 后修改对应配置。
+
+首次部署需要联网下载基础镜像、Node/PyTorch 依赖、SenseVoice 源码与权重，以及 Laya 模型，耗时取决于网络速度：
+
+- `sensevoice`：构建时获取固定版本的上游源码和 ModelScope 权重，校验 SHA-256 后打入镜像；运行时不依赖宿主机模型目录。
+- `ollama`：由本工程启动固定版本的 Ollama，模型保存到项目独立的 `ollama-data` Docker 卷；默认不向宿主机公开模型端口。
+- `ollama-init`：通过官方 TypeScript SDK 检查完整模型标签，缺失时自动下载，再完成一次真实 Laya 决策推理。模型已缓存时跳过下载；首次 CUDA 内核编译可能需要一分钟以上，启动检查最多等待 5 分钟。初始化成功后以退出码 0 结束。
+- `web`：等待 SenseVoice 健康、Laya 初始化成功后启动，通过 `http://sensevoice:50000` 和 `http://ollama:11434` 访问模型。
+
+`docker compose build` 只构建镜像；上面的 `up -d --build` 才包含启动 Ollama、首次下载 Laya 和启动网站。下载失败可重试同一命令；初始化/推理失败时网站不会被错误地标记为就绪，可查看 `ollama-init` 和 `ollama` 日志。
 
 ```bash
-docker compose ps                  # 两个服务应为 healthy
+docker compose ps -a               # web/sensevoice/ollama 应为 healthy；ollama-init 应 Exited (0)
 docker compose logs -f web         # 网站日志
 docker compose logs -f sensevoice  # 推理服务日志
+docker compose logs -f ollama-init ollama  # 模型下载、初始化和决策运行日志
 docker compose down               # 停止本 Demo
 ```
 
-迁移到其他机器时，复制 `.env.example` 为 `.env`，修改 `SENSEVOICE_SOURCE`、`SENSEVOICE_MODEL_PATH` 和可选的 `APP_PORT`。模型目录需包含 `model.pt`、`config.yaml`、`tokens.json`、分词模型及 `am.mvn`，Compose 会以只读方式挂载；目录不存在时会直接报错。
+普通 `docker compose down` 会保留 Laya 模型卷，下次启动复用已下载模型；`docker compose down -v` 会删除本工程的模型卷，下次需要重新下载。SenseVoice 权重随镜像保留。部署到另一台电脑时复制仓库即可，再执行同一条启动命令；首次部署需要网络，并不是仅复制仓库即可离线部署。
+
+旧 `.env` 中的 `SENSEVOICE_SOURCE`、`SENSEVOICE_MODEL_PATH`、`OLLAMA_DOCKER_BASE_URL` 已不再被 Compose 读取。已有的其他工程 Ollama 容器和模型目录不属于此部署，新服务使用独立的数据卷。可保留原服务，它的宿主机 11434 端口不会与这里的内部端口冲突。
+
+如果首次拉取 Laya 提示 `redirect target not allowed`、`resolves to non-public 198.18.*`，说明当前代理的 Fake-IP DNS 返回了虚拟地址。需要在代理 DNS 配置中让报错的模型存储域名解析为真实公网 IP，然后重试启动命令。模型已经下载到卷后，后续启动不会再次拉取。
 
 **浏览器麦克风要求：** 本机请使用 `localhost` 或 `127.0.0.1`。用手机或其他电脑访问局域网 IP 时，需要提供 HTTPS；普通 `http://192.168.x.x:3000` 只能预览灯效，浏览器不会开放麦克风。推荐使用新版 Chrome、Edge 或 Safari。未提供 HTTPS 的网络访问会显示明确提示。
 
@@ -86,23 +99,23 @@ SenseVoice 对短音频片段的情绪判断可能不稳定，部分扩展标签
 
 ## 短回应配置
 
-服务端使用官方 `ollama@0.6.4` 的 `systemone()` 调用现有 Docker Ollama 中的 `laya:322m-multilingual-mlx-fp16`，通过 [System One 决策接口](https://docs.ollama.com/api/systemone)评价 CSV 中的合法候选。无需 API key，不再使用聊天生成模型或代理。前端只提交当前声学情绪、任务标识和界面是否可显示；候选、概率、权重和使用记录均留在服务端。
+服务端使用官方 `ollama@0.6.4` 的 `systemone()` 调用同一 Compose 内 Ollama 中的 `laya:322m-multilingual-mlx-fp16`，通过 [System One 决策接口](https://docs.ollama.com/api/systemone)评价 CSV 中的合法候选。无需 API key，不再使用聊天生成模型或代理。前端只提交当前声学情绪、任务标识和界面是否可显示；候选、概率、权重和使用记录均留在服务端。
 
-复制 `.env.example` 为 `.env`（已有文件时编辑相关配置），确保本机 Ollama 已加载完整模型标签，再构建网站容器：
+默认模型会自动下载并验证，无需手动执行 `ollama pull`。修改配置后重新启动：
 
 ```bash
-docker compose up -d --build web
+docker compose up -d --build
 ```
 
 | 配置 | 默认值 / 说明 |
 | --- | --- |
 | `LAYA_MODEL` | `laya:322m-multilingual-mlx-fp16`，保留完整标签 |
-| `OLLAMA_BASE_URL` | 开发默认 `http://127.0.0.1:11434`，填写服务根地址 |
-| `OLLAMA_DOCKER_BASE_URL` | 容器默认 `http://host.docker.internal:11434`；Compose 保留 `host-gateway` 映射 |
+| `OLLAMA_BASE_URL` | 本机开发默认 `http://127.0.0.1:11435`；Compose 自动设置为 `http://ollama:11434` |
+| `OLLAMA_DEV_PORT` | 开发覆盖文件公开的宿主机端口，默认 `11435`；修改后同步修改开发用 `OLLAMA_BASE_URL` |
 | `LAYA_TIMEOUT_MS` | 默认 `5000`，允许 `1000–10000`；浏览器总期限 12 秒 |
 | `REACTION_CATALOG_PATH` | 默认 `config/reaction-phrases.csv`；容器中使用容器可达路径 |
 
-复用已有 Ollama，不在 Compose 中重复启动模型服务。容器内的 `127.0.0.1` 指向容器本身；宿主机 Ollama 端口需允许 Web 容器访问。旧 `.env` 中的 `LLM_*` 项已不再读取，可移除。
+`LAYA_MODEL` 同时用于初始化服务和网站服务；更换标签后重新执行启动命令会下载并检查新模型。Ollama 镜像版本和摘要固定在 `compose.yaml`，升级时需重新验证 System One 接口及 GPU 运行库。运行期间 Ollama 出错只影响短回应，SenseVoice 健康检查保持独立。旧 `.env` 中的 `LLM_*` 项已不再读取，可移除。
 
 `config/reaction-phrases.csv` 是唯一词库来源。字段为 `id,text,emotions,weight,cooldown_seconds,enabled`：情绪用 `|` 分隔，权重为有限正数，冷却为非负整数秒，开关为 `true/false`。允许 UTF-8 BOM、LF/CRLF、标准 CSV 引号和空白行。文字必须为 1–2 个英文词，可含缩写和一个结尾句号或感叹号，并完整适配 64 列矩阵。弯撇号统一为直撇号；ID、规范化文字不能重复。每种情绪最多 20 条启用短语；停用行也校验。`unknown` 不可配置，平静候选默认停用。
 
@@ -180,14 +193,14 @@ Node.js / Fastify / TypeScript
   校验音频、限制并发、请求超时、解析情绪标签
               ↓ Docker 内部 HTTP
 SenseVoice 推理服务
-  现有 model.py + 本地模型权重 → 原始文字 / 情绪 / 声音事件
+  镜像中的 model.py + 模型权重 → 原始文字 / 情绪 / 声音事件
               ↓
 React Three Fiber 液态球体 / Canvas 2D 灯光矩阵 + 实时转写
 ```
 
 网站前后端、音频采集与测试代码使用 **TypeScript / TSX**，构建工具是 Vite，服务端使用 Fastify，图形使用 Three.js、React Three Fiber 和 Drei。没有手写 JavaScript 源文件；浏览器运行的 JavaScript 是正常的编译产物。
 
-SenseVoice 本身依赖 Python / PyTorch，因此保留独立推理容器。[inference/serve.py](inference/serve.py) 只是原模型的薄适配层：加载已有源码、用标准库解析 WAV、调用模型。不修改 `/home/zxc/workspace3/code/SenseVoice`，也不依赖其原 API 的可选 TorchCodec 音频解码组件。当前镜像为 CPU 版本，默认使用 4 个推理线程，可通过 `INFERENCE_THREADS` 调整。
+SenseVoice 本身依赖 Python / PyTorch，因此保留独立推理容器。[inference/serve.py](inference/serve.py) 只是原模型的薄适配层：加载镜像内的上游源码、用标准库解析 WAV、调用模型。源码固定到提交 `586bbdb2b052f4fe19322581825228b6810a9fb3`，ModelScope 权重固定到 `7bf452403abd7353a300cd760f7adae7701c92c1`；下载文件及校验值集中在 [docker/sensevoice.Dockerfile](docker/sensevoice.Dockerfile)，源码许可证和模型说明随镜像保存。不依赖原 API 的可选 TorchCodec 音频解码组件。当前镜像为 CPU 版本，默认使用 4 个推理线程，可通过 `INFERENCE_THREADS` 调整。
 
 | 文件 | 用途 |
 | --- | --- |
@@ -205,25 +218,27 @@ SenseVoice 本身依赖 Python / PyTorch，因此保留独立推理容器。[inf
 | `server/laya.ts`、`server/reaction.ts`、`server/reactionRoutes.ts` | 官方 Ollama SDK、决策编排与接口 |
 | `server/reactionContext.ts`、`server/reactionUsage.ts`、`server/reactionDecision.ts` | 情绪稳定、频控、使用记录、概率融合与加权选择 |
 | `config/reaction-phrases.csv`、`server/reactionCatalog.ts`、`shared/reactionCatalog.ts` | 词库、CSV 加载和通用格式校验 |
-| `compose.yaml`、`Dockerfile`、`docker/sensevoice.Dockerfile` | 两个容器的一键构建与启动 |
+| `server/modelSetup.ts`、`server/prepareModels.ts` | Laya 模型缓存检查、下载、实际推理验证与初始化入口 |
+| `compose.yaml`、`Dockerfile`、`docker/sensevoice.Dockerfile` | 网站、两项模型服务及一次性初始化的一键构建与启动 |
 
 参考：[SenseVoice 官方模型](https://huggingface.co/FunAudioLLM/SenseVoiceSmall)、[React Three Fiber](https://r3f.docs.pmnd.rs/getting-started/installation)、[Fastify TypeScript](https://fastify.dev/docs/latest/Reference/TypeScript/)。
 
 ## 本地开发
 
-需要 Node.js 22.12+（本机使用 Node.js 24）以及 Docker Compose v2+。用开发覆盖配置把模型端口绑定到本机，然后启动 TypeScript 开发服务：
+需要 Node.js 22.12+（本机使用 Node.js 24）以及上述 Docker/GPU 环境。用开发覆盖配置把模型端口绑定到本机，然后启动 TypeScript 开发服务：
 
 ```bash
-docker compose -f compose.yaml -f compose.dev.yaml up -d sensevoice
+docker compose -f compose.yaml -f compose.dev.yaml up -d --build sensevoice ollama-init
 npm ci
 npm run dev
 ```
 
 - 前端：`http://localhost:5173`
 - Node API：`http://127.0.0.1:3001`
-- 本机模型：`http://127.0.0.1:50000`
+- SenseVoice：`http://127.0.0.1:50000`
+- Ollama：`http://127.0.0.1:11435`（避免与其他工程的 11434 冲突）
 
-如使用其他推理地址，可通过环境变量启动，例如 `SENSEVOICE_URL=http://127.0.0.1:50000 npm run dev`。Node 开发和生产入口都会自动加载工作目录下的 `.env`，已有进程环境变量优先；修改配置后需重启进程。Compose 使用 `OLLAMA_DOCKER_BASE_URL` 设置容器中的 Ollama 地址。
+如使用其他推理地址，可通过环境变量启动，例如 `SENSEVOICE_URL=http://127.0.0.1:50000 npm run dev`。Node 开发和生产入口都会自动加载工作目录下的 `.env`，已有进程环境变量优先；修改配置后需重启进程。开发用 `OLLAMA_BASE_URL` 不会覆盖 Compose 内部服务地址。
 
 ```bash
 npm run typecheck

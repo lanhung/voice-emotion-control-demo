@@ -1,4 +1,4 @@
-"""Thin adapter for the user's unmodified SenseVoice model.py.
+"""Thin adapter for the pinned upstream SenseVoice model.py.
 
 The website, audio capture, API orchestration and visual effects are TypeScript.
 Only the existing PyTorch model runs in this inference sidecar. WAV decoding uses
@@ -21,7 +21,7 @@ from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from starlette.concurrency import run_in_threadpool
 
 sys.path.insert(0, os.environ.get("SENSEVOICE_SOURCE", "/opt/SenseVoice"))
-from model import SenseVoiceSmall  # noqa: E402 — original local SenseVoice source
+from model import SenseVoiceSmall  # noqa: E402 — upstream source bundled in the image
 
 lock = threading.Lock()
 model = None
