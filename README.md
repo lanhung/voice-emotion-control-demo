@@ -26,6 +26,49 @@ docker compose down               # 停止本 Demo
 
 **浏览器麦克风要求：** 本机请使用 `localhost` 或 `127.0.0.1`。用手机或其他电脑访问局域网 IP 时，需要提供 HTTPS；普通 `http://192.168.x.x:3000` 只能预览灯效，浏览器不会开放麦克风。推荐使用新版 Chrome、Edge 或 Safari。未提供 HTTPS 的网络访问会显示明确提示。
 
+## 内网 HTTPS：直接加载固定证书
+
+使用一对固定的自签名证书和私钥，Vite 开发服务器和 Fastify 网站服务直接提供 HTTPS。证书通过文件挂载，不需要额外容器；启动不会生成或更换证书。
+
+在项目根目录执行一次以下命令，将两处 `192.168.1.10` 换成测试设备实际访问的服务器 IP（已有证书时直接使用）：
+
+```bash
+mkdir -p certs
+openssl req -x509 -newkey rsa:2048 -sha256 -nodes \
+  -keyout certs/server.key -out certs/server.crt -days 365 \
+  -subj "/CN=192.168.1.10" \
+  -addext "subjectAltName=IP:192.168.1.10,IP:127.0.0.1,DNS:localhost" \
+  -addext "extendedKeyUsage=serverAuth"
+chmod 600 certs/server.key
+```
+
+在 `.env` 中设置：
+
+```dotenv
+HTTPS_CERT_FILE=certs/server.crt
+HTTPS_KEY_FILE=certs/server.key
+```
+
+启动 Docker 网站服务：
+
+```bash
+docker compose up -d --build web
+```
+
+访问 **`https://192.168.1.10:3000`**（端口以 `APP_PORT` 为准）。Docker 只读挂载 `certs/`，不把证书打进镜像；容器的 Node 用户（UID 1000）需要有文件读取权限。若私钥属于其他用户，请调整属主或文件 ACL，让该用户可以读取，同时保留私钥访问限制。
+
+`npm run dev` 读取相同的 `.env` 配置，前端使用 **`https://192.168.1.10:5173`**，API 使用 HTTPS 并由 Vite 同源代理。证书须保留 `127.0.0.1`，供开发代理及 Docker 健康检查验证使用。只有构建时不读取证书，因此镜像构建无需证书文件。
+
+访问设备需要导入并信任 `server.crt`，然后允许网站使用麦克风。证书信任方式取决于设备和浏览器；仅点击跳过证书警告不能作为麦克风可用的保证。服务器 IP 改变或证书过期时重新生成证书并重启服务；每次替换自签名证书后，访问设备也需要重新信任。证书与私钥默认不会提交到 Git。
+
+可在服务器验证 HTTPS（保留证书验证）：
+
+```bash
+curl --cacert certs/server.crt https://127.0.0.1:3000/api/health
+```
+
+将两个 `HTTPS_*_FILE` 配置都清空并重启即可使用原来的 HTTP。仅设置一个路径，或证书无法读取、格式错误、私钥不匹配时，服务会明确报错并停止启动。
+
 ## 体验
 
 - 连续采集麦克风，每 **2.5 秒**提交一段音频，同时显示输入音量；实际结果在窗口结束后加上模型推理时间到达。

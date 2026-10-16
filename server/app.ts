@@ -8,11 +8,13 @@ import type { HealthResponse } from '../shared/emotions';
 import { measureSignal } from '../shared/monitoring';
 import { registerReactionRoutes } from './reactionRoutes';
 import type { ReactionServiceOptions } from './reaction';
+import type { HttpsOptions } from './https';
 
-interface AppOptions { sensevoiceUrl?: string; logger?: boolean; staticDir?: string; reaction?: ReactionServiceOptions }
+interface AppOptions { sensevoiceUrl?: string; logger?: boolean; staticDir?: string; reaction?: ReactionServiceOptions; https?: HttpsOptions }
 
 export async function buildApp(options: AppOptions = {}) {
-  const app = Fastify({ logger: options.logger === false ? false : { level: process.env.LOG_LEVEL ?? 'info' },
+  const app = Fastify({ ...(options.https ? { https: options.https } : {}),
+    logger: options.logger === false ? false : { level: process.env.LOG_LEVEL ?? 'info' },
     logController: new LogController({ disableRequestLogging: true }), genReqId: () => randomUUID(), bodyLimit: 160_044, requestTimeout: 45_000 });
   const sensevoiceUrl = (options.sensevoiceUrl ?? process.env.SENSEVOICE_URL ?? 'http://127.0.0.1:50000').replace(/\/$/, '');
   let inFlight = 0;

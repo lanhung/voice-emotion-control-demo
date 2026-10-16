@@ -1,5 +1,7 @@
 node_modules/
 dist/
+certs/*
+!certs/.gitkeep
 .env
 .env.*
 !.env.example

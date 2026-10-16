@@ -1,9 +1,10 @@
 import { buildApp } from './app';
 import { existsSync } from 'node:fs';
 import { loadEnvFile } from 'node:process';
+import { readHttpsOptions } from './https';
 
 if (existsSync('.env')) loadEnvFile('.env');
-const app = await buildApp();
+const app = await buildApp({ https: readHttpsOptions() });
 const port = Number(process.env.PORT ?? (process.env.NODE_ENV === 'production' ? 3000 : 3001));
 await app.listen({ port, host: process.env.HOST ?? '0.0.0.0' });
 for (const signal of ['SIGINT', 'SIGTERM'] as const) {
