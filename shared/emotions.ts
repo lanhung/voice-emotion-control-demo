@@ -1,3 +1,5 @@
+import type { RecognitionOptions } from './recognition';
+
 export const emotions = {
   neutral: { label: '平静', english: 'Calm', color: '#08b5b8', secondary: '#20e3b2', accent: '#20cbd9', description: '青绿呼吸，缓缓流动', speed: 0.8, distort: 0.26 },
   happy: { label: '愉悦', english: 'Joy', color: '#ff9f00', secondary: '#ff6414', accent: '#ffdb38', description: '金橙光芒，轻盈跃动', speed: 2.4, distort: 0.48 },
@@ -22,6 +24,7 @@ export interface AnalysisResult {
   durationMs: number;
   tags: string[];
   emotionTag: string | null;
+  recognitionOptions?: RecognitionOptions;
   trace?: {
     requestId: string;
     sessionId: string;

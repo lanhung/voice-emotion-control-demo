@@ -5,13 +5,14 @@ import { emotions, type AnalysisResult, type Emotion, type TranscriptEntry } fro
 import { emptyMetrics, measureSignal, toDbfs, type InputDeviceInfo, type VoiceMetrics } from '../../shared/monitoring';
 import { useMonitor } from './useMonitor';
 import { useReaction } from './useReaction';
+import { defaultCaptureWindowMs, defaultRecognitionOptions, type CaptureSettings } from '../../shared/recognition';
 
 type Phase = 'idle' | 'requesting' | 'listening' | 'finishing';
 type AudioMessage = { type: 'level'; rms: number; peak: number }
   | { type: 'chunk'; samples: Float32Array; sampleRate: number }
   | { type: 'flushed'; submittedSamples: number; discardedSamples: number; sampleRate: number };
 interface Capture { context: AudioContext; stream: MediaStream; source: MediaStreamAudioSourceNode; node: AudioWorkletNode; gain: GainNode }
-interface AudioWindow { wav: ArrayBuffer; sequence: number; capturedAt: number; durationMs: number }
+interface AudioWindow { wav: ArrayBuffer; sequence: number; capturedAt: number; durationMs: number; settings: CaptureSettings }
 
 function microphoneError(error: unknown): string {
   if (error instanceof DOMException) {
@@ -40,6 +41,7 @@ export function useVoice() {
   const [devices, setDevices] = useState<MediaDeviceInfo[]>([]);
   const [selectedDeviceId, setSelectedDeviceId] = useState('');
   const [autoGain, setAutoGain] = useState(false);
+  const [captureSettings, setCaptureSettings] = useState<CaptureSettings>({ ...defaultRecognitionOptions, windowMs: defaultCaptureWindowMs });
   const [thresholdDb, setThresholdDbState] = useState(-55);
   const [skipSilence, setSkipSilenceState] = useState(true);
   const [inputInfo, setInputInfo] = useState<InputDeviceInfo | null>(null);
@@ -60,6 +62,12 @@ export function useVoice() {
   const abortRef = useRef<AbortController | null>(null);
   const flushRef = useRef<(() => void) | null>(null);
   const clockRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const updateCaptureSettings = useCallback((patch: Partial<CaptureSettings>) => {
+    if (phaseRef.current !== 'idle') return;
+    setCaptureSettings((current) => ({ ...current, ...patch }));
+    log('settings.recognition', '识别设置已调整，下次开麦生效', patch);
+  }, [log]);
 
   const updateMetrics = useCallback((patch: Partial<VoiceMetrics>) => {
     metricsRef.current = { ...metricsRef.current, ...patch }; setMetrics(metricsRef.current);
@@ -111,11 +119,13 @@ export function useVoice() {
           const sentAt = performance.now();
           updateMetrics({ queued: queueRef.current.length, submitted: metricsRef.current.submitted + 1 });
           log('request.sent', `#${chunk.sequence} 音频已提交`, { sequence: chunk.sequence, bytes: chunk.wav.byteLength,
-            durationMs: chunk.durationMs, queueWaitMs: Math.round(sentAt - chunk.capturedAt), queued: queueRef.current.length });
+            durationMs: chunk.durationMs, settings: chunk.settings,
+            queueWaitMs: Math.round(sentAt - chunk.capturedAt), queued: queueRef.current.length });
           const controller = new AbortController(); abortRef.current = controller;
           const reactionGeneration = captureReactionGeneration();
           const response = await fetch('/api/analyze', {
-            method: 'POST', headers: { 'Content-Type': 'audio/wav', 'X-Aura-Session': sessionIdRef.current!, 'X-Aura-Sequence': String(chunk.sequence) }, body: chunk.wav,
+            method: 'POST', headers: { 'Content-Type': 'audio/wav', 'X-Aura-Session': sessionIdRef.current!, 'X-Aura-Sequence': String(chunk.sequence),
+              'X-Aura-Language': chunk.settings.language, 'X-Aura-Ban-Emo-Unk': String(chunk.settings.banUnknownEmotion) }, body: chunk.wav,
             signal: AbortSignal.any([controller.signal, AbortSignal.timeout(35_000)]),
           });
           if (!response.ok) {
@@ -132,7 +142,7 @@ export function useVoice() {
           log('recognition.result', `#${chunk.sequence} ${result.emotionTag ?? '无情绪标签'} → ${emotions[result.emotion].label}`, {
             sequence: chunk.sequence, requestId: result.trace?.requestId, tags: result.tags, emotion: result.emotion,
             text: result.text, isSpeech: result.isSpeech, events: result.events, roundTripMs, upstreamMs: result.latencyMs,
-            serverMs: result.trace?.serverMs, ...result.inference,
+            serverMs: result.trace?.serverMs, recognitionOptions: result.recognitionOptions, ...result.inference,
           });
           if (result.isSpeech || result.events.length) {
             const same = emotionRef.current === result.emotion && metricsRef.current.sameEmotionCount > 0;
@@ -170,9 +180,11 @@ export function useVoice() {
       setError(message); log('mic.unsupported', message, { secureContext: window.isSecureContext }, 'error'); return;
     }
     const session = ++sessionRef.current;
+    const sessionSettings = { ...captureSettings };
     sessionIdRef.current = crypto.randomUUID(); updateMetrics(emptyMetrics()); setLastResult(null);
     beginReaction(sessionIdRef.current);
-    log('session.started', '开始真实麦克风采集', { intervalMs: 2500, thresholdDb: thresholdRef.current, skipSilence: skipSilenceRef.current, autoGainControl: autoGain, secureContext: window.isSecureContext });
+    log('session.started', '开始真实麦克风采集', { intervalMs: sessionSettings.windowMs, settings: sessionSettings,
+      thresholdDb: thresholdRef.current, skipSilence: skipSilenceRef.current, autoGainControl: autoGain, secureContext: window.isSecureContext });
     updatePhase('requesting'); setQuiet(false); setElapsed(0); setLevels(Array(38).fill(0));
     let context: AudioContext | undefined;
     let stream: MediaStream | undefined;
@@ -195,7 +207,7 @@ export function useVoice() {
       await context.audioWorklet.addModule(processorUrl);
       if (session !== sessionRef.current) { stream.getTracks().forEach((audioTrack) => audioTrack.stop()); await context.close(); return; }
       const source = context.createMediaStreamSource(stream);
-      const node = new AudioWorkletNode(context, 'aura-capture', { channelCount: 1 });
+      const node = new AudioWorkletNode(context, 'aura-capture', { channelCount: 1, processorOptions: { windowMs: sessionSettings.windowMs } });
       const gain = context.createGain(); gain.gain.value = 0;
       captureRef.current = { context, stream, source, node, gain };
       context.onstatechange = () => {
@@ -230,7 +242,7 @@ export function useVoice() {
           }
           if (queueRef.current.length >= 4) { fail('模型处理速度暂时跟不上录音，已停止采集。请稍后重新开始。', { sequence, queued: queueRef.current.length }); return; }
           const wav = encodeWav(resample(message.samples, message.sampleRate));
-          queueRef.current.push({ wav, sequence, capturedAt: performance.now(), durationMs });
+          queueRef.current.push({ wav, sequence, capturedAt: performance.now(), durationMs, settings: sessionSettings });
           updateMetrics({ queued: queueRef.current.length }); pump(session);
         } else {
           log('audio.flushed', message.submittedSamples > 0 ? '末尾音频已送入片段处理流程'
@@ -248,7 +260,7 @@ export function useVoice() {
         audioTrack.onunmute = () => log('mic.unmuted', '麦克风输入已恢复');
       });
       source.connect(node); node.connect(gain); gain.connect(context.destination);
-      log('audio.worklet_ready', '实时音频处理器已启动；输出为 16 kHz 单声道 WAV', { captureRate: context.sampleRate, targetRate: 16000, intervalMs: 2500 });
+      log('audio.worklet_ready', '实时音频处理器已启动；输出为 16 kHz 单声道 WAV', { captureRate: context.sampleRate, targetRate: 16000, intervalMs: sessionSettings.windowMs });
       updatePhase('listening');
       const started = Date.now(); lastFrameRef.current = started;
       let stalled = false;
@@ -264,7 +276,7 @@ export function useVoice() {
       if (context && context.state !== 'closed') await context.close().catch(() => undefined);
       if (session === sessionRef.current) fail(microphoneError(err), { errorType: err instanceof Error ? err.name : 'Unknown' });
     }
-  }, [autoGain, beginReaction, fail, log, pump, refreshDevices, selectedDeviceId, sessionIdRef, updateMetrics, updatePhase]);
+  }, [autoGain, beginReaction, captureSettings, fail, log, pump, refreshDevices, selectedDeviceId, sessionIdRef, updateMetrics, updatePhase]);
 
   const stop = useCallback(async () => {
     if (phaseRef.current === 'requesting') { fail('已取消麦克风连接。'); return; }
@@ -298,6 +310,7 @@ export function useVoice() {
   return { phase, entries, emotion, error, level, levels, elapsed, processing, latency, quiet, start, stop, reaction,
     events, log, clearLogs, exportLogs, signal, metrics, inputInfo, lastResult, sessionId: sessionIdRef.current,
     devices, selectedDeviceId, setSelectedDeviceId, autoGain, setAutoGain, refreshDevices, thresholdDb, skipSilence,
+    captureSettings, updateCaptureSettings,
     setThresholdDb: (value: number) => { thresholdRef.current = value; setThresholdDbState(value); log('settings.threshold', `静音门限调整为 ${value} dBFS`, { thresholdDb: value }); },
     setSkipSilence: (value: boolean) => { skipSilenceRef.current = value; setSkipSilenceState(value); log('settings.silence', value ? '开启静音过滤' : '关闭静音过滤，每段都送入模型', { skipSilence: value }); },
     clear: () => { resetReaction(); setEntries([]); setLatency(null); log('transcript.cleared', '已清空页面转写记录'); }, dismissError: () => setError(null) };

@@ -3,6 +3,7 @@ import { Activity, ArrowDownToLine, ChevronDown, Mic, RefreshCw, Trash2 } from '
 import type { useVoice } from '../hooks/useVoice';
 import { emotions, type Emotion } from '../../shared/emotions';
 import type { VisualizationMode } from './visualization';
+import { captureWindows, parseCaptureWindow, recognitionLanguages, recognitionLanguageLabels, type RecognitionLanguage } from '../../shared/recognition';
 
 interface MonitorProps { voice: ReturnType<typeof useVoice>; health: string; displayEmotion: Emotion; preview: boolean; visualization: VisualizationMode }
 export default function MonitorPanel({ voice, health, displayEmotion, preview, visualization }: MonitorProps) {
@@ -40,7 +41,7 @@ export default function MonitorPanel({ voice, health, displayEmotion, preview, v
     {open && <div id="monitor-content">
       <div className="monitor-stages">
         <span className={voice.phase === 'listening' ? 'active' : ''}><i />麦克风 {voice.inputInfo?.state === 'running' ? '采集中' : '未采集'}</span><b>→</b>
-        <span><i />2.5 秒分段</span><b>→</b><span className={health === 'ready' ? 'active' : ''}><i />SenseVoice {health === 'ready' ? '就绪' : '未连接'}</span><b>→</b>
+        <span><i />{voice.captureSettings.windowMs / 1000} 秒分段</span><b>→</b><span className={health === 'ready' ? 'active' : ''}><i />SenseVoice {health === 'ready' ? '就绪' : '未连接'}</span><b>→</b>
         <span className={renderedCurrent ? 'active' : ''}><i />灯效 {renderedCurrent ? '已应用' : '切换中'}</span>
       </div>
       <div className="monitor-metrics">
@@ -61,6 +62,19 @@ export default function MonitorPanel({ voice, health, displayEmotion, preview, v
         <label><input type="checkbox" checked={voice.autoGain} disabled={voice.phase !== 'idle'} onChange={(event) => voice.setAutoGain(event.target.checked)} />自动增益</label>
       </div>
       <p className="monitor-tip">轻声说话被跳过时，将门限调低；关闭「跳过静音」可检查所有音频片段。</p>
+      <div className="monitor-settings" role="group" aria-label="语音识别设置">
+        <label>分段时长 <select aria-label="分段时长" disabled={voice.phase !== 'idle'} value={voice.captureSettings.windowMs}
+          onChange={(event) => voice.updateCaptureSettings({ windowMs: parseCaptureWindow(Number(event.target.value)) })}>
+          {captureWindows.map((windowMs) => <option key={windowMs} value={windowMs}>{windowMs / 1000} 秒</option>)}
+        </select></label>
+        <label>识别语言 <select aria-label="识别语言" disabled={voice.phase !== 'idle'} value={voice.captureSettings.language}
+          onChange={(event) => voice.updateCaptureSettings({ language: event.target.value as RecognitionLanguage })}>
+          {recognitionLanguages.map((language) => <option key={language} value={language}>{recognitionLanguageLabels[language]}</option>)}
+        </select></label>
+        <label><input type="checkbox" checked={!voice.captureSettings.banUnknownEmotion} disabled={voice.phase !== 'idle'}
+          onChange={(event) => voice.updateCaptureSettings({ banUnknownEmotion: !event.target.checked })} />允许待辨识</label>
+      </div>
+      <p className="monitor-tip">5 秒分段提供更长的语音上下文，出结果也更晚。默认由模型选择具体情绪，仍可能判断不准；开启「允许待辨识」可恢复未知标签。设置在下次开麦生效。</p>
       <div className="monitor-result">
         <span className="result-swatch" style={{ background: emotions[displayEmotion].color }} />
         <div><strong>{preview ? '正在预览灯效' : m.sameEmotionCount >= 2 ? `模型连续 ${m.sameEmotionCount} 段返回「${emotions[voice.emotion].label}」，主色保持不变` : last ? `最近模型标签：${last.emotionTag ?? '未知'} → ${emotions[last.emotion].label}` : '开麦后可检查模型判断与实际灯效是否一致'}</strong>

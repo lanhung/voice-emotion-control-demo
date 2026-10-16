@@ -1,3 +1,5 @@
+import { defaultCaptureWindowMs, parseCaptureWindow } from '../../shared/recognition';
+
 declare const sampleRate: number;
 declare abstract class AudioWorkletProcessor {
   readonly port: MessagePort;
@@ -7,14 +9,16 @@ declare abstract class AudioWorkletProcessor {
 declare function registerProcessor(name: string, processor: typeof AudioWorkletProcessor): void;
 
 class AuraCapture extends AudioWorkletProcessor {
-  private buffer = new Float32Array(Math.round(sampleRate * 2.5));
+  private buffer: Float32Array;
   private offset = 0;
   private levelFrames = 0;
   private sumSquares = 0;
   private peak = 0;
 
-  constructor() {
-    super();
+  constructor(options?: { processorOptions?: { windowMs?: number } }) {
+    super(options);
+    const windowMs = parseCaptureWindow(options?.processorOptions?.windowMs ?? defaultCaptureWindowMs);
+    this.buffer = new Float32Array(Math.round(sampleRate * windowMs / 1000));
     this.port.onmessage = (event: MessageEvent<string>) => {
       if (event.data === 'flush') {
         const pendingSamples = this.offset;

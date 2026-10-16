@@ -1,9 +1,11 @@
 import { z } from 'zod';
 import type { AnalysisResult, Emotion } from '../shared/emotions';
+import { defaultRecognitionOptions, recognitionLanguages, type RecognitionOptions } from '../shared/recognition';
 
 const responseSchema = z.object({
   result: z.array(z.object({ raw_text: z.string().optional(), text: z.string().optional() })),
   timings: z.object({ inferenceMs: z.number().nonnegative(), queueMs: z.number().nonnegative() }).optional(),
+  recognitionOptions: z.object({ language: z.enum(recognitionLanguages), banUnknownEmotion: z.boolean() }).optional(),
 });
 
 const emotionTags: Record<string, Emotion> = {
@@ -33,6 +35,7 @@ export function parseRecognition(data: unknown): Omit<AnalysisResult, 'latencyMs
     tags,
     emotionTag: emotionTag ?? null,
     ...(parsed.timings ? { inference: parsed.timings } : {}),
+    ...(parsed.recognitionOptions ? { recognitionOptions: parsed.recognitionOptions } : {}),
   };
 }
 
@@ -56,14 +59,16 @@ export function wavDuration(buffer: Buffer): number {
 export async function recognize(audio: Buffer, url: string, signal: AbortSignal,
   trace?: { requestId: string; sessionId: string; sequence: number },
   onStage?: (event: string, fields: Record<string, unknown>) => void,
+  options: RecognitionOptions = defaultRecognitionOptions,
 ): Promise<AnalysisResult> {
   const durationMs = wavDuration(audio);
   const form = new FormData();
   form.set('files', new Blob([new Uint8Array(audio)], { type: 'audio/wav' }), 'microphone.wav');
-  form.set('lang', 'auto');
+  form.set('lang', options.language);
+  form.set('ban_emo_unk', String(options.banUnknownEmotion));
   form.set('use_itn', 'true');
   const started = performance.now();
-  onStage?.('inference.dispatch', { audioBytes: audio.length, durationMs });
+  onStage?.('inference.dispatch', { audioBytes: audio.length, durationMs, recognitionOptions: options });
   const response = await fetch(`${url}/api/v1/asr`, { method: 'POST', body: form, signal,
     headers: trace ? { 'x-request-id': trace.requestId, 'x-aura-session': trace.sessionId, 'x-aura-sequence': String(trace.sequence) } : undefined });
   onStage?.('inference.response', { httpStatus: response.status, upstreamMs: Math.round(performance.now() - started) });

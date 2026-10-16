@@ -59,25 +59,27 @@ def health():
     return {"ready": model is not None, "model": "SenseVoiceSmall", "device": "cpu"}
 
 
-def infer(samples, lang, use_itn, trace):
+def infer(samples, lang, use_itn, ban_emo_unk, trace):
     queued_at = time.perf_counter()
     try:
         with lock, torch.inference_mode():
             started = time.perf_counter()
             queue_ms = round((started - queued_at) * 1000)
-            emit("inference.started", **trace, queueMs=queue_ms, samples=len(samples), language=lang)
+            options = {"language": lang, "banUnknownEmotion": ban_emo_unk}
+            emit("inference.started", **trace, queueMs=queue_ms, samples=len(samples), recognitionOptions=options)
             result, _metadata = model.inference(
                 data_in=[samples], key=["microphone"], language=lang,
-                use_itn=use_itn, ban_emo_unk=False, fs=16000, **model_kwargs,
+                use_itn=use_itn, ban_emo_unk=ban_emo_unk, fs=16000, **model_kwargs,
             )
             inference_ms = round((time.perf_counter() - started) * 1000)
         raw = "".join(item["text"] for item in result)
         tags = re.findall(r"<\|([^|]+)\|>", raw)
         text = re.sub(r"<\|[^|]*\|>", "", raw).strip()
         emit("inference.completed", **trace, tags=tags, textLength=len(text),
-             inferenceMs=inference_ms, queueMs=queue_ms, **({"text": text} if log_transcripts else {}))
+             inferenceMs=inference_ms, queueMs=queue_ms, recognitionOptions=options,
+             **({"text": text} if log_transcripts else {}))
         return {"result": [{"raw_text": item["text"]} for item in result],
-                "timings": {"inferenceMs": inference_ms, "queueMs": queue_ms}}
+                "timings": {"inferenceMs": inference_ms, "queueMs": queue_ms}, "recognitionOptions": options}
     except Exception as exc:
         emit("inference.failed", level="error", **trace, errorType=type(exc).__name__, reason=str(exc))
         raise
@@ -86,7 +88,7 @@ def infer(samples, lang, use_itn, trace):
 @app.post("/api/v1/asr")
 async def recognize(
     request: Request, files: UploadFile = File(...), lang: str = Form("auto"),
-    use_itn: bool = Form(True),
+    use_itn: bool = Form(True), ban_emo_unk: bool = Form(True),
 ):
     trace = {"requestId": request.headers.get("x-request-id", "untracked")[:64],
              "sessionId": request.headers.get("x-aura-session", "untracked")[:64],
@@ -111,4 +113,4 @@ async def recognize(
     emit("audio.decoded", **trace, audioBytes=len(raw), sampleRate=16000, durationMs=len(samples) / 16,
          rms=round(rms, 6), peak=round(float(np.max(np.abs(samples))), 6),
          dbfs=round(20 * float(np.log10(max(rms, 0.000001))), 1))
-    return await run_in_threadpool(infer, samples, lang, use_itn, trace)
+    return await run_in_threadpool(infer, samples, lang, use_itn, ban_emo_unk, trace)

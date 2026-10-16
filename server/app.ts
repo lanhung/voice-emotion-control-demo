@@ -9,8 +9,15 @@ import { measureSignal } from '../shared/monitoring';
 import { registerReactionRoutes } from './reactionRoutes';
 import type { ReactionServiceOptions } from './reaction';
 import type { HttpsOptions } from './https';
+import { defaultRecognitionOptions, recognitionLanguages, type RecognitionLanguage, type RecognitionOptions } from '../shared/recognition';
 
 interface AppOptions { sensevoiceUrl?: string; logger?: boolean; staticDir?: string; reaction?: ReactionServiceOptions; https?: HttpsOptions }
+interface AnalyzeHeaders {
+  'x-aura-session'?: string;
+  'x-aura-sequence'?: string;
+  'x-aura-language'?: RecognitionLanguage;
+  'x-aura-ban-emo-unk'?: 'true' | 'false';
+}
 
 export async function buildApp(options: AppOptions = {}) {
   const app = Fastify({ ...(options.https ? { https: options.https } : {}),
@@ -61,13 +68,20 @@ export async function buildApp(options: AppOptions = {}) {
     }
   });
 
-  app.post<{ Body: Buffer }>('/api/analyze', { schema: { headers: {
+  app.post<{ Body: Buffer; Headers: AnalyzeHeaders }>('/api/analyze', { schema: { headers: {
     type: 'object', properties: {
       'x-aura-session': { type: 'string', pattern: '^[A-Za-z0-9_-]{1,64}$' },
       'x-aura-sequence': { type: 'string', pattern: '^[0-9]{1,7}$' },
+      'x-aura-language': { type: 'string', enum: [...recognitionLanguages] },
+      'x-aura-ban-emo-unk': { type: 'string', enum: ['true', 'false'] },
     },
   } } }, async (request, reply) => {
     const started = performance.now();
+    const recognitionOptions: RecognitionOptions = {
+      language: request.headers['x-aura-language'] ?? defaultRecognitionOptions.language,
+      banUnknownEmotion: request.headers['x-aura-ban-emo-unk'] === undefined
+        ? defaultRecognitionOptions.banUnknownEmotion : request.headers['x-aura-ban-emo-unk'] === 'true',
+    };
     const trace = { requestId: request.id, sessionId: String(request.headers['x-aura-session'] ?? 'untracked'),
       sequence: Number(request.headers['x-aura-sequence'] ?? 0), receivedAt: new Date().toISOString() };
     const log = request.log.child(trace);
@@ -82,7 +96,7 @@ export async function buildApp(options: AppOptions = {}) {
     const samples = new Float32Array((request.body.length - 44) / 2);
     for (let i = 0; i < samples.length; i++) samples[i] = request.body.readInt16LE(44 + i * 2) / 32768;
     log.info({ event: 'audio.received', audioBytes: request.body.length, durationMs: samples.length / 16,
-      sampleRate: 16000, ...measureSignal(samples), inFlight }, 'Audio window received');
+      sampleRate: 16000, ...measureSignal(samples), inFlight, recognitionOptions }, 'Audio window received');
     if (inFlight >= 2) {
       log.warn({ event: 'audio.rejected', reason: 'busy', inFlight }, 'Inference concurrency limit reached');
       return reply.code(429).header('Retry-After', '2').send({ error: '模型正在处理，请稍后重试。' });
@@ -96,11 +110,12 @@ export async function buildApp(options: AppOptions = {}) {
     reply.raw.on('close', onClose);
     try {
       const result = await recognize(request.body, sensevoiceUrl, AbortSignal.any([controller.signal, AbortSignal.timeout(30_000)]), trace,
-        (event, fields) => log.info({ event, ...fields }, event));
+        (event, fields) => log.info({ event, ...fields }, event), recognitionOptions);
       const serverMs = Math.round(performance.now() - started);
       log.info({ event: 'recognition.completed', tags: result.tags, emotionTag: result.emotionTag, emotion: result.emotion,
         language: result.language, isSpeech: result.isSpeech, events: result.events, textLength: result.text.length,
         latencyMs: result.latencyMs, serverMs, ...result.inference,
+        recognitionOptions: result.recognitionOptions,
         ...(logTranscripts ? { text: result.text } : {}) }, 'Emotion and transcription completed');
       return { ...result, trace: { ...trace, serverMs } };
     } catch (error) {

@@ -126,7 +126,7 @@ export default function App() {
             <span className="recording-time">{clock(voice.elapsed)}</span>
           </div>
           <p className="recording-hint">
-            {listening ? <><span className="hint-live-dot" />{voice.quiet ? '正在等你开口，静音片段不会识别' : voice.processing ? '正在理解你的声音…' : '自在地说，每 2.5 秒感受一次情绪'}</> : <><ShieldCheck size={13} />声音仅在本机处理，不保存录音</>}
+            {listening ? <><span className="hint-live-dot" />{voice.quiet ? '正在等你开口，静音片段不会识别' : voice.processing ? '正在理解你的声音…' : `自在地说，每 ${voice.captureSettings.windowMs / 1000} 秒感受一次情绪`}</> : <><ShieldCheck size={13} />声音仅在本机处理，不保存录音</>}
           </p>
           <div className="reaction-settings">
             <label><input type="checkbox" checked={voice.reaction.enabled} aria-describedby="reaction-description"
@@ -187,10 +187,10 @@ export default function App() {
       <button className="icon-button dialog-close" aria-label="关闭介绍" onClick={() => helpRef.current?.close()}><X size={20} /></button>
       <span className="about-mark"><AudioLines size={28} /></span><div className="eyebrow">MEET AURA</div>
       <h2>声音里，藏着光。</h2><p>Aura 将语音中的情绪，化作会呼吸的液态光球，或 8 × 64 灯光矩阵。</p>
-      <div className="about-step"><Headphones size={21} /><div><strong>自在地说</strong><span>允许麦克风，正常说话。每 2.5 秒更新一次转写与情绪，识别结果还需少量推理时间。</span></div></div>
+      <div className="about-step"><Headphones size={21} /><div><strong>自在地说</strong><span>允许麦克风，正常说话。按所选的 2.5 秒或 5 秒分段更新转写与情绪，识别结果还需少量推理时间。</span></div></div>
       <div className="about-step"><Sparkles size={21} /><div><strong>看见情绪</strong><span>在液态光球与灯光矩阵之间自由切换，颜色与律动跟随语音情绪变化。你也可以在开麦前，轻点情绪按钮预览灯效。</span></div></div>
       <div className="about-step"><ShieldCheck size={21} /><div><strong>本地处理声音</strong><span>声音在本地 SenseVoice 模型处理，不保存录音。开启「短回应」后，本轮文字与情绪线索会发送给配置的模型服务，是否传至云端取决于代理配置。</span></div></div>
-      <p className="about-note">情绪标签是模型对当前声音片段的判断，仅用于演示。无法判断时会显示「待辨识」。</p>
+      <p className="about-note">情绪标签是模型对当前声音片段的判断，仅用于演示。默认选择具体情绪；可在实时监控中开启「允许待辨识」，保留模型的未知情绪输出。</p>
       <button className="about-done" onClick={() => helpRef.current?.close()}>开始体验 <MoveUpRight size={16} /></button>
     </dialog>
     <a className="scroll-cue" href="#root" aria-hidden="true" tabIndex={-1}><ChevronDown size={15} /></a>

@@ -3,13 +3,14 @@ import { encodeWav, resample } from '../src/audio/wav';
 import { wavDuration } from '../server/sensevoice';
 
 describe('microphone audio transport', () => {
-  it.each([44100, 48000, 16000])('preserves 2.5-second duration from %i Hz input', (rate) => {
-    const samples = new Float32Array(rate * 2.5).fill(0.25);
+  it.each([44100, 48000, 16000].flatMap((rate) => [2.5, 5].map((seconds) => ({ rate, seconds }))))(
+    'preserves $seconds-second duration from $rate Hz input', ({ rate, seconds }) => {
+    const samples = new Float32Array(rate * seconds).fill(0.25);
     const downsampled = resample(samples, rate);
-    expect(downsampled.length).toBe(40000);
+    expect(downsampled.length).toBe(16000 * seconds);
     expect(downsampled[123]).toBeCloseTo(0.25);
     const wav = Buffer.from(encodeWav(downsampled));
-    expect(wavDuration(wav)).toBe(2500);
+    expect(wavDuration(wav)).toBe(seconds * 1000);
     expect(wav.readInt16LE(44)).toBe(8192);
   });
   it('clips PCM samples and encodes negative samples with the correct sign', () => {

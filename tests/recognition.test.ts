@@ -28,4 +28,11 @@ describe('SenseVoice result interpretation', () => {
     const result = parseRecognition({ result: [{ raw_text: '<|EMO_UNKNOWN|>test' }], timings: { inferenceMs: 142, queueMs: 3 } });
     expect(result).toMatchObject({ emotionTag: 'EMO_UNKNOWN', inference: { inferenceMs: 142, queueMs: 3 } });
   });
+  it('preserves the model settings and raw unknown tag even when concrete labels were requested', () => {
+    const result = parseRecognition({ result: [{ raw_text: '<|zh|><|EMO_UNKNOWN|>声音' }],
+      recognitionOptions: { language: 'zh', banUnknownEmotion: true } });
+    expect(result).toMatchObject({ emotion: 'unknown', emotionTag: 'EMO_UNKNOWN',
+      recognitionOptions: { language: 'zh', banUnknownEmotion: true } });
+    expect(result).not.toHaveProperty('confidence');
+  });
 });
