@@ -1,60 +1,36 @@
 import type { FastifyInstance } from 'fastify';
-import { createReactionGenerator, readLlmConfig, ReactionError, type LlmConfig } from './llm';
-import { reactionRequestSchema, type ReactionDecision } from './reaction';
-import type { ReactionErrorCode, ReactionResponse } from '../shared/reaction';
+import { displayedRequestSchema, reactionRequestSchema, type ReactionErrorCode } from '../shared/reaction';
+import { createReactionService, type ReactionServiceOptions } from './reaction';
 
-const DEDUPE_TTL_MS = 5 * 60_000;
-const MAX_REMEMBERED_TURNS = 512;
-const MAX_CONCURRENT_REACTIONS = 2;
-
-export function registerReactionRoutes(app: FastifyInstance, config: LlmConfig | null = readLlmConfig()) {
-  const generate = createReactionGenerator(config);
-  const active = new Map<string, AbortController>();
-  const seen = new Map<string, number>();
-  app.addHook('preClose', async () => { for (const controller of active.values()) controller.abort(); });
-
-  app.post('/api/reaction', { bodyLimit: 32_768 }, async (request, reply) => {
+const errorStatus: Record<ReactionErrorCode, number> = {
+  catalog_missing: 503, catalog_invalid: 503, invalid_configuration: 503, model_not_found: 503,
+  decision_timeout: 504, decision_unavailable: 502, invalid_model_output: 502, context_overflow: 502,
+  busy: 429, invalid_request: 400,
+};
+export async function registerReactionRoutes(app: FastifyInstance, options: ReactionServiceOptions = {}) {
+  const service = await createReactionService({ ...options,
+    log: options.log ?? ((event, fields) => app.log.info({ event, ...fields }, event)) });
+  const sweep = setInterval(() => service.sweep(), 1000); sweep.unref();
+  app.addHook('preClose', async () => { clearInterval(sweep); service.close(); });
+  app.post('/api/reaction/decision', { bodyLimit: 4096 }, async (request, reply) => {
     reply.header('Cache-Control', 'no-store').header('X-Request-Id', request.id);
     const parsed = reactionRequestSchema.safeParse(request.body);
-    if (!parsed.success) return reply.code(400).send({ status: 'error', code: 'invalid_request',
-      error: '短回应请求格式不正确，文字最多 4000 字。', requestId: request.id });
-    const input = parsed.data;
-    const started = performance.now();
-    const trace = { requestId: request.id, sessionId: input.sessionId, turnId: input.turnId };
-    const log = request.log.child(trace);
-    const finish = (result: ReactionDecision | { status: 'error'; code: ReactionErrorCode; error: string }): ReactionResponse => {
-      const latencyMs = Math.round(performance.now() - started);
-      log.info({ event: 'reaction.completed', status: result.status,
-        ...(result.status === 'skipped' ? { reason: result.reason } : result.status === 'error' ? { code: result.code } : {}),
-        ...(result.status === 'replied' ? { text: result.text } : {}),
-        ...(result.status !== 'error' ? { modelOutput: result.modelOutput,
-          outputTruncated: result.outputTruncated, finishReason: result.finishReason } : {}),
-        textLength: input.text.length, latencyMs }, 'Short reaction completed');
-      return { ...trace, ...result, latencyMs };
-    };
-    const now = Date.now();
-    for (const [key, expires] of seen) if (expires <= now) seen.delete(key);
-    const key = JSON.stringify([input.sessionId, input.turnId]);
-    if (seen.has(key)) return finish({ status: 'skipped', reason: 'duplicate' });
-    if (seen.size >= MAX_REMEMBERED_TURNS || (!active.has(input.sessionId) && active.size >= MAX_CONCURRENT_REACTIONS)) {
-      return reply.code(429).header('Retry-After', '2').send(finish({ status: 'error', code: 'busy', error: '短回应正在处理，请稍后再试。' }));
-    }
-    seen.set(key, now + DEDUPE_TTL_MS);
-    active.get(input.sessionId)?.abort();
+    if (!parsed.success) return reply.code(400).send({ status: 'error', code: 'invalid_request', error: '情绪决策请求格式不正确。', requestId: request.id });
     const controller = new AbortController();
-    active.set(input.sessionId, controller);
     const onClose = () => { if (!reply.raw.writableEnded) controller.abort(); };
     reply.raw.on('close', onClose);
     try {
-      if (!input.text.trim() || !/[\p{L}\p{N}]/u.test(input.text)) return finish({ status: 'skipped', reason: 'empty' });
-      log.info({ event: 'reaction.started', textLength: input.text.length }, 'Short reaction requested');
-      return finish(await generate({ ...input, text: input.text.trim() }, controller.signal));
-    } catch (error) {
-      const failure = error instanceof ReactionError ? error : new ReactionError('unavailable', 502, '短回应暂时不可用，可以继续聆听。');
-      return reply.code(failure.statusCode).send(finish({ status: 'error', code: failure.code, error: failure.message }));
-    } finally {
-      reply.raw.removeListener('close', onClose);
-      if (active.get(input.sessionId) === controller) active.delete(input.sessionId);
-    }
+      const result = await service.decide(parsed.data, controller.signal, request.id);
+      reply.header('X-Request-Id', result.requestId);
+      if (result.status === 'error') reply.code(errorStatus[result.code]);
+      return result;
+    } finally { reply.raw.removeListener('close', onClose); }
+  });
+  app.post('/api/reaction/displayed', { bodyLimit: 2048 }, async (request, reply) => {
+    reply.header('Cache-Control', 'no-store');
+    const parsed = displayedRequestSchema.safeParse(request.body);
+    if (!parsed.success) return reply.code(400).send({ error: '展示回执格式不正确。' });
+    const result = service.displayed(parsed.data);
+    return reply.code(result.status === 'rejected' ? 409 : 200).send(result);
   });
 }

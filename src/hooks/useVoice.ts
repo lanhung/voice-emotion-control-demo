@@ -26,7 +26,7 @@ function microphoneError(error: unknown): string {
 export function useVoice() {
   const { events, log, clearLogs, exportLogs, sessionIdRef } = useMonitor();
   const reaction = useReaction(log);
-  const { begin: beginReaction, append: appendReaction, complete: completeReaction, reset: resetReaction } = reaction;
+  const { begin: beginReaction, append: appendReaction, complete: completeReaction, reset: resetReaction, captureGeneration: captureReactionGeneration } = reaction;
   const [phase, setPhase] = useState<Phase>('idle');
   const [entries, setEntries] = useState<TranscriptEntry[]>([]);
   const [emotion, setEmotion] = useState<Emotion>('neutral');
@@ -113,6 +113,7 @@ export function useVoice() {
           log('request.sent', `#${chunk.sequence} 音频已提交`, { sequence: chunk.sequence, bytes: chunk.wav.byteLength,
             durationMs: chunk.durationMs, queueWaitMs: Math.round(sentAt - chunk.capturedAt), queued: queueRef.current.length });
           const controller = new AbortController(); abortRef.current = controller;
+          const reactionGeneration = captureReactionGeneration();
           const response = await fetch('/api/analyze', {
             method: 'POST', headers: { 'Content-Type': 'audio/wav', 'X-Aura-Session': sessionIdRef.current!, 'X-Aura-Sequence': String(chunk.sequence) }, body: chunk.wav,
             signal: AbortSignal.any([controller.signal, AbortSignal.timeout(35_000)]),
@@ -124,7 +125,7 @@ export function useVoice() {
           }
           const result = await response.json() as AnalysisResult;
           if (session !== sessionRef.current) return;
-          appendReaction(sessionIdRef.current!, result);
+          appendReaction(sessionIdRef.current!, result, reactionGeneration);
           const roundTripMs = Math.round(performance.now() - sentAt);
           setLatency(result.latencyMs); setLastResult(result);
           updateMetrics({ completed: metricsRef.current.completed + 1, lastSequence: chunk.sequence, roundTripMs });
@@ -159,7 +160,7 @@ export function useVoice() {
       }
     };
     processingRef.current = task();
-  }, [appendReaction, fail, log, sessionIdRef, updateMetrics]);
+  }, [appendReaction, captureReactionGeneration, fail, log, sessionIdRef, updateMetrics]);
 
   const start = useCallback(async () => {
     if (phaseRef.current !== 'idle') return;

@@ -139,7 +139,8 @@ export default function LiquidOrb(props: VisualizationProps) {
       </Suspense>
     </OrbBoundary>
     </div>
-    {props.reactionText && <LiquidReply key={props.reactionText} text={props.reactionText} emotion={props.emotion}
-      source={props.source} onEvent={props.onEvent} reducedMotion={reducedMotion} visible={visible} />}
+    {props.reactionText && <LiquidReply key={props.reactionDecisionId} text={props.reactionText} emotion={props.emotion}
+      source={props.source} onEvent={props.onEvent} reducedMotion={reducedMotion} visible={visible}
+      reactionDecisionId={props.reactionDecisionId} onReactionPainted={props.onReactionPainted} />}
   </div>;
 }

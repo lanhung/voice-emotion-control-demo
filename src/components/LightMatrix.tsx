@@ -5,7 +5,7 @@ import { layoutMatrixText, MATRIX_ROWS as ROWS, MATRIX_COLUMNS as COLUMNS } from
 
 const rgb = (hex: string) => [1, 3, 5].map((offset) => parseInt(hex.slice(offset, offset + 2), 16));
 
-export default function LightMatrix({ emotion, level, active, source, onEvent, reactionText }: VisualizationProps) {
+export default function LightMatrix({ emotion, level, active, source, onEvent, reactionText, reactionDecisionId, onReactionPainted }: VisualizationProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const input = useRef({ level, active });
   const colors = useRef([emotions.neutral.color, emotions.neutral.secondary, emotions.neutral.accent].map(rgb));
@@ -28,6 +28,8 @@ export default function LightMatrix({ emotion, level, active, source, onEvent, r
     let width = 0;
     let height = 0;
     let strength = 0;
+    let paintFrame = 0;
+    let reported = false;
     onEvent('visual.target', `矩阵灯效目标：${palette.label} ${palette.color.toUpperCase()}`, {
       source, emotion, color: palette.color, secondary: palette.secondary, speed: palette.speed,
       renderer: 'canvas2d', rows: ROWS, columns: COLUMNS, reducedMotion: motion.matches,
@@ -79,6 +81,10 @@ export default function LightMatrix({ emotion, level, active, source, onEvent, r
         }
       }
 
+      if (!reported && reactionDecisionId && lettering && width > 0 && !document.hidden) {
+        reported = true;
+        paintFrame = requestAnimationFrame(() => { if (!document.hidden) onReactionPainted(reactionDecisionId); });
+      }
       if (pending && width > 0 && colorError < 1.5) {
         pending = false;
         onEvent('visual.applied', `矩阵主色已生效：${palette.label} ${palette.color.toUpperCase()}`, {
@@ -116,10 +122,11 @@ export default function LightMatrix({ emotion, level, active, source, onEvent, r
     return () => {
       cancelAnimationFrame(frame);
       observer.disconnect();
+      cancelAnimationFrame(paintFrame);
       motion.removeEventListener('change', refresh);
       document.removeEventListener('visibilitychange', refresh);
     };
-  }, [emotion, onEvent, palette, source, lettering, reactionText]);
+  }, [emotion, onEvent, palette, source, lettering, reactionText, reactionDecisionId, onReactionPainted]);
 
   return <div className="light-matrix" role="img" aria-label={reactionText ? `灯光矩阵回应：${reactionText}` : `${palette.label}情绪的 8 行 64 列灯光矩阵`}>
     <div className="matrix-frame">

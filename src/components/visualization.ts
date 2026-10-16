@@ -10,4 +10,6 @@ export interface VisualizationProps {
   source: 'preview' | 'sensevoice' | 'idle';
   onEvent: LogEvent;
   reactionText: ReactionPhrase | null;
+  reactionDecisionId: string | null;
+  onReactionPainted: (decisionId: string) => void;
 }

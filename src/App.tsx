@@ -32,7 +32,9 @@ export default function App() {
   const log = voice.log;
   const reactionText = voice.reaction.enabled && voice.reaction.state.status === 'replied' ? voice.reaction.state.text : null;
   const visualProps: VisualizationProps = { emotion, level: voice.level, active: listening || preview !== null,
-    source: preview ? 'preview' : voice.lastResult ? 'sensevoice' : 'idle', onEvent: log, reactionText };
+    source: preview ? 'preview' : voice.lastResult ? 'sensevoice' : 'idle', onEvent: log, reactionText,
+    reactionDecisionId: voice.reaction.state.status === 'replied' ? voice.reaction.state.decisionId : null,
+    onReactionPainted: voice.reaction.painted };
   const changeVisualization = (mode: VisualizationMode) => {
     if (mode === visualization) return;
     setVisualization(mode);
@@ -129,7 +131,7 @@ export default function App() {
           <div className="reaction-settings">
             <label><input type="checkbox" checked={voice.reaction.enabled} aria-describedby="reaction-description"
               onChange={(event) => voice.reaction.setEnabled(event.target.checked)} />短回应<span>1–2 个英文词</span></label>
-            <p id="reaction-description">开启后，识别到语音便自动回应，无需结束聆听。仅将最近的文字与情绪线索发送给配置的模型服务；是否传至云端取决于代理配置。回复内容可在监控日志的「短回应」中查看。</p>
+            <p id="reaction-description">根据语音情绪，结合本地决策模型和词库选择简短陪伴反馈。情绪稳定且间隔合适时自动回应，无需结束聆听。转写文字不参与选词，反馈记录可在监控日志的「短回应」中查看。</p>
           </div>
         </div>
 

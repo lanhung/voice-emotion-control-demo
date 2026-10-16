@@ -7,9 +7,9 @@ import { recognize, wavDuration } from './sensevoice';
 import type { HealthResponse } from '../shared/emotions';
 import { measureSignal } from '../shared/monitoring';
 import { registerReactionRoutes } from './reactionRoutes';
-import type { LlmConfig } from './llm';
+import type { ReactionServiceOptions } from './reaction';
 
-interface AppOptions { sensevoiceUrl?: string; logger?: boolean; staticDir?: string; llmConfig?: LlmConfig | null }
+interface AppOptions { sensevoiceUrl?: string; logger?: boolean; staticDir?: string; reaction?: ReactionServiceOptions }
 
 export async function buildApp(options: AppOptions = {}) {
   const app = Fastify({ logger: options.logger === false ? false : { level: process.env.LOG_LEVEL ?? 'info' },
@@ -111,7 +111,7 @@ export async function buildApp(options: AppOptions = {}) {
     }
   });
 
-  registerReactionRoutes(app, options.llmConfig);
+  await registerReactionRoutes(app, options.reaction);
 
   const root = options.staticDir ?? resolve('dist/client');
   if (existsSync(root)) {

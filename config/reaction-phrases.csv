@@ -1,0 +1,60 @@
+id,text,emotions,weight,cooldown_seconds,enabled
+joy_awesome,Awesome!,happy,2,60,true
+joy_lovely,How lovely!,happy,1,60,true
+joy_wonderful,Wonderful!,happy,2,90,true
+joy_amazing,Amazing!,happy,1,90,true
+joy_fantastic,Fantastic!,happy,1,90,true
+joy_brilliant,Brilliant!,happy,1,90,true
+joy_delightful,Delightful!,happy,1,90,true
+joy_simply_lovely,Lovely!,happy,1,90,true
+joy_so_nice,So nice!,happy,2,60,true
+joy_so_sweet,So sweet!,happy,1,90,true
+joy_thats_great,That's great!,happy,2,90,true
+joy_how_nice,How nice!,happy,1,90,true
+joy_love_that,Love that!,happy,2,90,true
+joy_yay,Yay!,happy,1,60,true
+joy_hooray,Hooray!,happy,1,90,true
+joy_woohoo,Woohoo!,happy,1,90,true
+joy_sweet,Sweet!,happy,1,90,true
+joy_so_happy,So happy!,happy,1,90,true
+joy_what_joy,What joy!,happy,1,90,true
+joy_beautiful,Beautiful!,happy,1,90,true
+
+support_here,I'm here.,sad|fearful|angry|disgusted,3,60,true
+support_with_you,With you.,sad|fearful,2,60,true
+support_understand,I understand.,sad|angry|disgusted,1,90,true
+support_listening,I'm listening.,sad|fearful|angry|disgusted,3,60,true
+support_care,I care.,sad|fearful|angry|disgusted,2,90,true
+support_heard,You're heard.,sad|fearful|angry|disgusted,2,90,true
+support_matter,You matter.,sad|fearful,1,120,true
+support_not_alone,Not alone.,sad|fearful,2,90,true
+support_beside_you,Beside you.,sad|fearful,1,90,true
+support_still_here,Still here.,sad|fearful|angry|disgusted,2,90,true
+support_right_here,Right here.,sad|fearful|angry|disgusted,2,90,true
+support_no_rush,No rush.,sad|fearful|angry|disgusted,2,90,true
+support_no_pressure,No pressure.,sad|fearful|angry|disgusted,1,90,true
+support_your_pace,Your pace.,sad|fearful|angry|disgusted,1,90,true
+support_take_time,Take time.,sad|fearful|angry|disgusted,1,90,true
+support_gentle_hugs,Gentle hugs.,sad|fearful,1,120,true
+support_sending_hugs,Sending hugs.,sad|fearful,1,120,true
+support_sorry,I'm sorry.,sad|angry|disgusted,1,120,true
+support_that_hurts,That hurts.,sad|angry|disgusted,1,120,true
+support_sounds_tough,Sounds tough.,sad|fearful|angry|disgusted,1,120,true
+
+surprise_oh,Oh!,surprised,1,60,true
+surprise_wow,Wow!,surprised,1,60,true
+surprise_oh_wow,Oh wow!,surprised,1,90,true
+surprise_whoa,Whoa!,surprised,1,90,true
+surprise_oh_my,Oh my!,surprised,1,90,true
+surprise_gosh,Gosh!,surprised,1,90,true
+surprise_goodness,My goodness!,surprised,1,120,true
+surprise_unexpected,Unexpected!,surprised,1,120,true
+
+neutral_got_it,Got it.,neutral,1,90,false
+neutral_i_see,I see.,neutral,1,90,false
+neutral_okay,Okay.,neutral,1,90,false
+neutral_understood,Understood.,neutral,1,90,false
+neutral_alright,Alright.,neutral,1,90,false
+neutral_noted,Noted.,neutral,1,90,false
+neutral_go_on,Go on.,neutral,1,90,false
+neutral_listening,Listening.,neutral,1,90,false

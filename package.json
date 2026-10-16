@@ -9,6 +9,7 @@
     "start": "node dist/server/index.js",
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.server.json && tsc --noEmit -p tsconfig.worklet.json",
     "test": "vitest run",
+    "check:reactions": "tsx scripts/check-reaction-catalog.ts",
     "test:e2e": "playwright test"
   },
   "dependencies": {
@@ -16,9 +17,10 @@
     "@fontsource-variable/dm-sans": "^5.3.0",
     "@react-three/drei": "^10.7.9",
     "@react-three/fiber": "^9.8.1",
+    "csv-parse": "7.0.3",
     "fastify": "^5.12.7",
     "lucide-react": "^0.577.0",
-    "openai": "7.34.0",
+    "ollama": "0.6.4",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "three": "^0.183.0",

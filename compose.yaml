@@ -8,10 +8,12 @@ services:
       SENSEVOICE_URL: http://sensevoice:50000
       LOG_LEVEL: ${LOG_LEVEL:-info}
       LOG_TRANSCRIPTS: ${LOG_TRANSCRIPTS:-false}
-      LLM_BASE_URL: ${LLM_DOCKER_BASE_URL:-http://host.docker.internal:8317/v1}
-      LLM_MODEL: ${LLM_MODEL:-gpt-6-luna}
-      LLM_API_KEY: ${LLM_API_KEY:-}
-      LLM_TIMEOUT_MS: ${LLM_TIMEOUT_MS:-10000}
+      OLLAMA_BASE_URL: ${OLLAMA_DOCKER_BASE_URL:-http://host.docker.internal:11434}
+      LAYA_MODEL: ${LAYA_MODEL:-laya:322m-multilingual-mlx-fp16}
+      LAYA_TIMEOUT_MS: ${LAYA_TIMEOUT_MS:-5000}
+      REACTION_CATALOG_PATH: ${REACTION_CATALOG_PATH:-config/reaction-phrases.csv}
+    volumes:
+      - ./config:/app/config:ro
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:

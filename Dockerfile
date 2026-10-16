@@ -11,6 +11,7 @@ WORKDIR /app
 COPY --from=build --chown=node:node /app/package.json ./
 COPY --from=build --chown=node:node /app/node_modules ./node_modules
 COPY --from=build --chown=node:node /app/dist ./dist
+COPY --from=build --chown=node:node /app/config ./config
 USER node
 EXPOSE 3000
 HEALTHCHECK --interval=20s --timeout=5s --start-period=15s --retries=3 \

@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { reactionPhrases } from '../shared/reaction';
+import { defaultCatalog } from './reaction-fixtures';
 import { layoutMatrixText, MATRIX_COLUMNS, MATRIX_ROWS } from '../src/visualization/matrixText';
 
 describe('reaction lettering on the physical light matrix', () => {
-  it.each(reactionPhrases)('fits the complete phrase %s without clipping', (phrase) => {
+  it.each(defaultCatalog.phrases.map((phrase) => phrase.text))('fits the complete phrase %s without clipping', (phrase) => {
     const { pixels, width, offset } = layoutMatrixText(phrase);
     expect(pixels.length).toBe(MATRIX_ROWS * MATRIX_COLUMNS);
     expect(width).toBeLessThanOrEqual(MATRIX_COLUMNS);

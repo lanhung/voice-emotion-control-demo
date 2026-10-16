@@ -1,16 +1,16 @@
 import { expect, test, type Page } from '@playwright/test';
 import type { ReactionPhrase } from '../../shared/reaction';
 import { layoutMatrixText } from '../../src/visualization/matrixText';
+import { replyToDecision } from './reaction-fixture';
 
 async function showReply(page: Page, text: ReactionPhrase, matrix = false) {
   await page.route('**/api/analyze', (route) => route.fulfill({ json: {
     text: '我准备好了。', emotion: 'neutral', isSpeech: true, language: 'zh', events: [],
     tags: ['zh', 'NEUTRAL', 'Speech'], emotionTag: 'NEUTRAL', latencyMs: 10, durationMs: 2500,
   } }));
-  await page.route('**/api/reaction', (route) => {
-    const input = route.request().postDataJSON() as { sessionId: string; turnId: string };
-    return route.fulfill({ json: { sessionId: input.sessionId, turnId: input.turnId, requestId: 'visual-test', latencyMs: 10, status: 'replied', text } });
-  });
+  await page.route('**/api/health', (route) => route.fulfill({ json: { status: 'ready', model: 'SenseVoiceSmall', intervalMs: 2500 } }));
+  await page.route('**/api/reaction/decision', (route) => replyToDecision(route, route.request().postDataJSON(), { text }));
+  await page.route('**/api/reaction/displayed', (route) => route.fulfill({ json: { status: 'accepted', decisionId: route.request().postDataJSON().decisionId } }));
   await page.goto('/');
   if (matrix) await page.getByRole('button', { name: /灯光矩阵/ }).click();
   await page.getByRole('checkbox', { name: '跳过静音', exact: true }).uncheck();
@@ -89,4 +89,32 @@ test('liquid words remain readable without WebGL, respect reduced motion and cle
   await expect(page.getByRole('img', { name: '平静情绪的液态光球' })).toBeVisible();
   await expect(page.locator('.orb-surface')).toHaveCSS('opacity', '1');
   await expect(page.locator('.fallback-orb')).toBeVisible();
+});
+
+test('animated liquid replies acknowledge the first visible frame and finish within one display lifetime', async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: 'no-preference' });
+  const receipts: string[] = [];
+  await page.route('**/api/health', (route) => route.fulfill({ json: { status: 'ready', model: 'SenseVoiceSmall', intervalMs: 2500 } }));
+  await page.route('**/api/analyze', (route) => route.fulfill({ json: {
+    text: '准备好了。', emotion: 'happy', isSpeech: true, language: 'zh', events: [], tags: [], emotionTag: 'HAPPY', latencyMs: 1, durationMs: 2500,
+  } }));
+  let decisions = 0;
+  await page.route('**/api/reaction/decision', (route) => replyToDecision(route, route.request().postDataJSON(),
+    ++decisions === 1 ? { text: 'Awesome!' } : { status: 'skipped', reason: 'global_interval' }));
+  await page.route('**/api/reaction/displayed', (route) => {
+    const id = route.request().postDataJSON().decisionId; receipts.push(id);
+    return route.fulfill({ json: { status: 'accepted', decisionId: id } });
+  });
+  await page.goto('/');
+  await page.getByRole('checkbox', { name: '跳过静音', exact: true }).uncheck();
+  await page.getByRole('checkbox', { name: '短回应' }).check();
+  await page.getByRole('button', { name: '开始聆听', exact: true }).click();
+  await expect(page.getByTestId('liquid-reply')).toHaveAttribute('data-morph', 'forming');
+  await expect.poll(() => receipts.length).toBe(1);
+  const paintedAt = Date.now();
+  await expect(page.getByTestId('liquid-reply')).toHaveAttribute('data-morph', 'text');
+  await page.getByTestId('liquid-reply').screenshot({ path: '.artifacts/reaction-orb-animated.png' });
+  await expect(page.getByTestId('liquid-reply')).toHaveCount(0, { timeout: 3000 });
+  expect(Date.now() - paintedAt).toBeLessThan(3300); expect(receipts).toHaveLength(1);
+  await page.getByRole('button', { name: '结束聆听', exact: true }).click();
 });

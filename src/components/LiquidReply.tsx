@@ -4,13 +4,13 @@ import type { ReactionPhrase } from '../../shared/reaction';
 import { createLiquidTextShape, liquidMorphProgress, type LiquidTextShape } from '../visualization/liquidText';
 import type { VisualizationProps } from './visualization';
 
-interface Props extends Pick<VisualizationProps, 'source' | 'onEvent'> { text: ReactionPhrase; emotion: Emotion; reducedMotion: boolean; visible: boolean }
+interface Props extends Pick<VisualizationProps, 'source' | 'onEvent' | 'reactionDecisionId' | 'onReactionPainted'> { text: ReactionPhrase; emotion: Emotion; reducedMotion: boolean; visible: boolean }
 
 const shade = (hex: string, factor: number) => `rgb(${[1, 3, 5].map((offset) => Math.round(parseInt(hex.slice(offset, offset + 2), 16) * factor)).join(',')})`;
 
 // A Canvas 2D droplet surface also works when WebGL is unavailable. It is mounted
 // only for an accepted reply and shares its lifetime with the reaction controller.
-export default function LiquidReply({ text, emotion, reducedMotion, visible, source, onEvent }: Props) {
+export default function LiquidReply({ text, emotion, reducedMotion, visible, source, onEvent, reactionDecisionId, onReactionPainted }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const startedRef = useRef(performance.now());
 
@@ -27,6 +27,8 @@ export default function LiquidReply({ text, emotion, reducedMotion, visible, sou
     let frame = 0;
     let disposed = false;
     let pending = true;
+    let paintFrame = 0;
+    let paintReported = false;
     const started = startedRef.current;
 
     const draw = (now: number) => {
@@ -81,6 +83,10 @@ export default function LiquidReply({ text, emotion, reducedMotion, visible, sou
       context.shadowBlur = 16;
       context.shadowOffsetY = 5;
       context.drawImage(surface, 0, 0, width, height);
+      if (!paintReported && reactionDecisionId && visible && !document.hidden) {
+        paintReported = true;
+        paintFrame = requestAnimationFrame(() => { if (!document.hidden) onReactionPainted(reactionDecisionId); });
+      }
       canvas.dataset.morph = progress === 1 ? 'text' : 'forming';
       if (pending && progress === 1) {
         pending = false;
@@ -111,8 +117,8 @@ export default function LiquidReply({ text, emotion, reducedMotion, visible, sou
     observer.observe(canvas);
     resize();
     void document.fonts.load('750 96px "DM Sans"').then(() => { if (!disposed) resize(); }).catch(() => undefined);
-    return () => { disposed = true; cancelAnimationFrame(frame); observer.disconnect(); };
-  }, [text, emotion, reducedMotion, visible, source, onEvent]);
+    return () => { disposed = true; cancelAnimationFrame(frame); cancelAnimationFrame(paintFrame); observer.disconnect(); };
+  }, [text, emotion, reducedMotion, visible, source, onEvent, reactionDecisionId, onReactionPainted]);
 
   return <canvas ref={canvasRef} className="liquid-reply" data-testid="liquid-reply" data-text={text} aria-hidden="true" />;
 }

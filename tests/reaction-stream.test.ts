@@ -1,211 +1,131 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AnalysisResult } from '../shared/emotions';
-import { REACTION_ANIMATION_GAP_MS, REACTION_COALESCE_MS, REACTION_DISPLAY_MS, REACTION_MIN_INTERVAL_MS,
-  type ReactionRequest, type ReactionResponse } from '../shared/reaction';
+import type { ReactionRequest, ReactionResponse, ReactionReply, DisplayedRequest, DisplayedResponse } from '../shared/reaction';
 import { ReactionStream, type ReactionState } from '../src/reaction/stream';
+import { requestReaction } from '../src/reaction/client';
 
-const speech = (text = '我考上了！'): AnalysisResult => ({ text, emotion: 'happy', durationMs: 2500,
-  language: 'zh', events: [], isSpeech: true, latencyMs: 10, tags: ['zh', 'HAPPY', 'Speech'], emotionTag: 'HAPPY' });
-function setup(enabled = true) {
-  const calls: { input: ReactionRequest; signal: AbortSignal; at: number; resolve: (value: ReactionResponse) => void }[] = [];
-  const log = vi.fn();
-  let state: ReactionState = { status: 'idle' };
-  const stream = new ReactionStream({ log, onState: (value) => { state = value; },
-    request: (input, signal) => new Promise((resolve) => calls.push({ input, signal, at: Date.now(), resolve })) });
-  stream.setEnabled(enabled); stream.begin('session');
-  const respond = async (index = 0, patch: Partial<ReactionResponse> = {}) => {
-    const call = calls[index];
-    call.resolve({ sessionId: call.input.sessionId, turnId: call.input.turnId, requestId: `request-${index}`,
-      latencyMs: 20, status: 'replied', text: 'Congrats!', modelOutput: 'Congrats!', ...patch } as ReactionResponse);
-    await vi.advanceTimersByTimeAsync(0);
+const speech = (emotion: AnalysisResult['emotion'] = 'sad'): AnalysisResult => ({
+  text: 'This transcript stays in the browser.', emotion, isSpeech: true, language: 'en', events: [], tags: [],
+  emotionTag: null, latencyMs: 10, durationMs: 2500,
+});
+function harness() {
+  const calls: { input: ReactionRequest; signal: AbortSignal; resolve: (value: ReactionResponse) => void }[] = [];
+  const log = vi.fn(); let state: ReactionState = { status: 'idle' };
+  const acknowledge = vi.fn(async (input: DisplayedRequest, _signal: AbortSignal): Promise<DisplayedResponse> => ({ status: 'accepted', decisionId: input.decisionId }));
+  const stream = new ReactionStream({ log, acknowledge, onState: (value) => { state = value; },
+    request: (input, signal) => new Promise((resolve) => calls.push({ input, signal, resolve })) });
+  const respond = async (index = 0, patch: Partial<ReactionReply> = {}) => {
+    const input = calls[index].input;
+    const reply: ReactionReply = { ...input, emotion: 'sad', requestId: 'response', latencyMs: 20, status: 'replied',
+      decisionId: input.turnId, phraseId: 'support_here', text: "I'm here.", expiresAt: Date.now() + 5000, displayMs: 2500, animationGapMs: 5000, ...patch };
+    calls[index].resolve(reply); await Promise.resolve(); await Promise.resolve(); return reply;
   };
-  return { stream, calls, log, respond, state: () => state };
+  const skip = async (index = 0) => {
+    calls[index].resolve({ ...calls[index].input, requestId: 'skip', latencyMs: 1, status: 'skipped', reason: 'unstable_emotion' });
+    await Promise.resolve(); await Promise.resolve();
+  };
+  stream.begin('session'); stream.setEnabled(true);
+  return { stream, calls, acknowledge, log, respond, skip, state: () => state };
 }
+beforeEach(() => vi.useFakeTimers());
+afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
 
-beforeEach(() => { vi.useFakeTimers(); vi.setSystemTime(0); });
-afterEach(() => vi.useRealTimers());
-
-describe('near-real-time reactions', () => {
-  it('responds and logs the actual phrase while recording, then expires from arrival without duplicate stop requests', async () => {
-    const { stream, calls, log, respond, state } = setup();
-    stream.append('session', speech());
-    await vi.advanceTimersByTimeAsync(REACTION_COALESCE_MS - 1);
-    expect(calls).toHaveLength(0);
-    await vi.advanceTimersByTimeAsync(1);
-    expect(calls).toHaveLength(1);
-    expect(log).toHaveBeenCalledWith('reaction.requested', expect.any(String), expect.objectContaining({ trigger: 'recognition' }));
-    await vi.advanceTimersByTimeAsync(5000);
-    expect(state().status).toBe('waiting');
-    await respond();
-    expect(state()).toEqual({ status: 'replied', text: 'Congrats!' });
-    expect(log).toHaveBeenCalledWith('reaction.received', '大模型回复：Congrats!', expect.objectContaining({ modelOutput: 'Congrats!', text: 'Congrats!' }));
-    expect(log).toHaveBeenCalledWith('reaction.displayed', '已展示短回应：Congrats!', expect.objectContaining({ text: 'Congrats!' }));
-    stream.complete('session'); stream.complete('session');
-    await vi.advanceTimersByTimeAsync(REACTION_DISPLAY_MS - 1);
-    expect(state().status).toBe('replied');
-    await vi.advanceTimersByTimeAsync(1);
-    expect(state().status).toBe('idle');
-    expect(calls).toHaveLength(1);
+describe('display-only browser stream', () => {
+  it('sends only one fragment and identities, and acknowledges only after the renderer reports a paint', async () => {
+    const h = harness(); h.stream.append('session', speech());
+    expect(Object.keys(h.calls[0].input).sort()).toEqual(['clientId', 'sessionId', 'generation', 'turnId', 'sequence', 'emotion', 'isSpeech', 'canDisplay'].sort());
+    expect(h.state()).toEqual({ status: 'waiting' });
+    const result = await h.respond(); expect(h.acknowledge).not.toHaveBeenCalled();
+    h.stream.painted('wrong'); expect(h.acknowledge).not.toHaveBeenCalled();
+    h.stream.painted(result.decisionId); h.stream.painted(result.decisionId);
+    expect(h.acknowledge).toHaveBeenCalledTimes(1);
+    expect(h.acknowledge.mock.calls[0][0]).toEqual({ clientId: result.clientId, sessionId: result.sessionId, generation: result.generation, decisionId: result.decisionId });
+    await vi.advanceTimersByTimeAsync(2000); h.stream.painted(result.decisionId);
+    await vi.advanceTimersByTimeAsync(500); expect(h.state()).toEqual({ status: 'idle' });
+    expect(h.acknowledge).toHaveBeenCalledTimes(1);
   });
-
-  it('coalesces new results while a slow request runs, includes negation, and processes the final tail exactly once', async () => {
-    const { stream, calls, respond, state } = setup();
-    stream.append('session', speech('我一直在准备考试，'));
-    await vi.advanceTimersByTimeAsync(REACTION_COALESCE_MS);
-    stream.append('session', speech('最后没有考上。'));
-    await vi.advanceTimersByTimeAsync(5000);
-    expect(calls).toHaveLength(1);
-    stream.append('session', speech('现在有点失落。'));
-    stream.complete('session');
-    await respond();
-    await vi.advanceTimersByTimeAsync(REACTION_DISPLAY_MS);
-    expect(state().status).toBe('idle');
-    await vi.advanceTimersByTimeAsync(REACTION_ANIMATION_GAP_MS - 1);
-    expect(calls).toHaveLength(1); // Stop must respect the animation interval too.
-    await vi.advanceTimersByTimeAsync(1);
-    expect(calls).toHaveLength(2);
-    expect(calls[1].input.text).toBe('我一直在准备考试，\n最后没有考上。\n现在有点失落。');
-    expect(calls[0].signal.aborted).toBe(false);
-    expect(calls[1].input.turnId).not.toBe(calls[0].input.turnId);
-    await respond(1); await vi.advanceTimersByTimeAsync(20000);
-    expect(calls).toHaveLength(2);
+  it('forwards canDisplay=false while displaying and during the animation gap, without scheduling a later decision', async () => {
+    const h = harness(); h.stream.append('session', speech()); const reply = await h.respond(); h.stream.painted(reply.decisionId);
+    h.stream.append('session', speech()); expect(h.calls[1].input.canDisplay).toBe(false); await h.skip(1);
+    expect(h.state().status).toBe('replied');
+    await vi.advanceTimersByTimeAsync(2500); h.stream.append('session', speech());
+    expect(h.calls[2].input.canDisplay).toBe(false); await h.skip(2);
+    await vi.advanceTimersByTimeAsync(5000); expect(h.calls).toHaveLength(3);
+    h.stream.append('session', speech()); expect(h.calls[3].input.canDisplay).toBe(true);
   });
-
-  it('still limits fast requests when the model returns NONE without starting a display interval', async () => {
-    const { stream, calls, respond, state, log } = setup();
-    stream.append('session', speech()); await vi.advanceTimersByTimeAsync(REACTION_COALESCE_MS);
-    await vi.advanceTimersByTimeAsync(1000);
-    await respond(0, { status: 'skipped', reason: 'none', modelOutput: 'NONE' });
-    expect(state().status).toBe('idle');
-    stream.append('session', speech('谢谢你'));
-    await vi.advanceTimersByTimeAsync(REACTION_MIN_INTERVAL_MS - 1001);
-    expect(calls).toHaveLength(1);
-    await vi.advanceTimersByTimeAsync(1);
-    expect(calls).toHaveLength(2);
-    expect(calls[1].at - calls[0].at).toBe(REACTION_MIN_INTERVAL_MS);
-    expect(state().status).toBe('waiting');
-    await respond(1, { status: 'skipped', reason: 'none', modelOutput: 'NONE' });
-    expect(state().status).toBe('idle');
-    expect(log).toHaveBeenCalledWith('reaction.received', '大模型回复：NONE', expect.objectContaining({ reason: 'none' }));
+  it('retains only the latest unsent fragment, preserves a compatible request and flushes a final fragment after stop', async () => {
+    const h = harness(); h.stream.append('session', speech());
+    h.stream.append('session', speech()); h.stream.append('session', speech());
+    expect(h.calls).toHaveLength(1); expect(h.calls[0].signal.aborted).toBe(false);
+    h.stream.complete('session'); await h.skip();
+    expect(h.calls).toHaveLength(2); expect(h.calls[1].input.sequence).toBe(3);
+    h.stream.append('session', speech()); expect(h.calls).toHaveLength(2);
+    const reply = await h.respond(1); expect(h.state()).toMatchObject({ status: 'replied', decisionId: reply.decisionId });
   });
-
-  it('gives every reply a full animation interval, including repeated phrases, and uses the newest recognition', async () => {
-    const { stream, calls, respond, state } = setup();
-    stream.append('session', speech()); await vi.advanceTimersByTimeAsync(REACTION_COALESCE_MS);
-    await respond();
-    stream.append('session', speech('显示文字时说的内容'));
-    await vi.advanceTimersByTimeAsync(REACTION_DISPLAY_MS - 1);
-    expect(state()).toEqual({ status: 'replied', text: 'Congrats!' });
-    expect(calls).toHaveLength(1);
-    await vi.advanceTimersByTimeAsync(1);
-    expect(state().status).toBe('idle');
-    await vi.advanceTimersByTimeAsync(REACTION_ANIMATION_GAP_MS - 1);
-    stream.append('session', speech('动画期间最新的补充'));
-    expect(calls).toHaveLength(1);
-    expect(state().status).toBe('idle');
-    await vi.advanceTimersByTimeAsync(1);
-    expect(calls).toHaveLength(2);
-    expect(calls[1].input.text).toContain('显示文字时说的内容\n动画期间最新的补充');
-    expect(calls[1].at - calls[0].at).toBe(REACTION_DISPLAY_MS + REACTION_ANIMATION_GAP_MS);
-    await respond(1); // The same phrase is a new display, not an extension of the first.
-    expect(state()).toEqual({ status: 'replied', text: 'Congrats!' });
-    stream.append('session', speech('继续说话'));
-    await vi.advanceTimersByTimeAsync(REACTION_DISPLAY_MS);
-    expect(state().status).toBe('idle');
-    await vi.advanceTimersByTimeAsync(REACTION_ANIMATION_GAP_MS - 1);
-    expect(calls).toHaveLength(2);
-    await vi.advanceTimersByTimeAsync(1);
-    expect(calls).toHaveLength(3);
+  it('aborts incompatible emotion, drops its result and sends the newest label without browser aggregation', async () => {
+    const h = harness(); h.stream.append('session', speech()); h.stream.append('session', speech('happy'));
+    expect(h.calls[0].signal.aborted).toBe(true); await h.respond();
+    expect(h.calls).toHaveLength(2); expect(h.calls[1].input.emotion).toBe('happy');
+    expect(h.state().status).toBe('waiting'); expect(h.acknowledge).not.toHaveBeenCalled();
   });
-
-  it.each(['new-recording', 'disable', 'clear', 'dispose'] as const)('cancels recognition queued during the animation interval after %s', async (action) => {
-    const { stream, calls, respond } = setup();
-    stream.append('session', speech()); await vi.advanceTimersByTimeAsync(REACTION_COALESCE_MS);
-    await respond();
-    stream.append('session', speech('等待下一次回应的内容'));
-    await vi.advanceTimersByTimeAsync(REACTION_DISPLAY_MS + 1000);
-    if (action === 'new-recording') stream.begin('next-session');
-    if (action === 'disable') stream.setEnabled(false);
-    if (action === 'clear') stream.reset();
-    if (action === 'dispose') stream.dispose();
-    if (action === 'new-recording') {
-      stream.append('next-session', speech('全新录音'));
-      await vi.advanceTimersByTimeAsync(REACTION_COALESCE_MS);
-      expect(calls).toHaveLength(2);
-      expect(calls[1].input.text).toBe('全新录音');
-    }
-    await vi.advanceTimersByTimeAsync(40000);
-    expect(calls).toHaveLength(action === 'new-recording' ? 2 : 1);
+  it.each(['disable', 'reset', 'hidden', 'new-session', 'dispose'] as const)('drops late responses after %s', async (action) => {
+    const h = harness(); h.stream.append('session', speech());
+    if (action === 'disable') h.stream.setEnabled(false);
+    if (action === 'reset') h.stream.reset();
+    if (action === 'hidden') h.stream.setVisible(false);
+    if (action === 'new-session') h.stream.begin('new');
+    if (action === 'dispose') h.stream.dispose();
+    expect(h.calls[0].signal.aborted).toBe(true); await h.respond();
+    expect(h.state().status).not.toBe('replied'); expect(h.acknowledge).not.toHaveBeenCalled();
   });
-
-  it('starts the animation interval when a delayed display timer actually clears the text', async () => {
-    const { stream, calls, respond, state } = setup();
-    stream.append('session', speech()); await vi.advanceTimersByTimeAsync(REACTION_COALESCE_MS);
-    await respond();
-    stream.append('session', speech('暂停期间的新内容'));
-    vi.setSystemTime(Date.now() + 60000); // A suspended browser has not run the display timer yet.
-    await vi.advanceTimersByTimeAsync(REACTION_DISPLAY_MS);
-    expect(state().status).toBe('idle');
-    await vi.advanceTimersByTimeAsync(REACTION_ANIMATION_GAP_MS - 1);
-    expect(calls).toHaveLength(1);
-    await vi.advanceTimersByTimeAsync(1);
-    expect(calls).toHaveLength(2);
+  it('preserves the page identity across clear, enable and new recordings, while incrementing generations', async () => {
+    const h = harness(); h.stream.append('session', speech()); await h.skip(); const original = h.calls[0].input;
+    h.stream.reset(); h.stream.append('session', speech()); await h.skip(1);
+    h.stream.setEnabled(false); h.stream.setEnabled(true); h.stream.append('session', speech()); await h.skip(2);
+    h.stream.begin('second'); h.stream.append('second', speech());
+    expect(h.calls.map((call) => call.input.clientId)).toEqual(Array(4).fill(original.clientId));
+    expect(h.calls.map((call) => call.input.generation)).toEqual([2, 3, 5, 6]);
+    expect(h.calls.at(-1)!.input.sequence).toBe(1);
   });
-
-  it('can be enabled during recording and ignores silence, punctuation and other sessions', async () => {
-    const { stream, calls } = setup(false);
-    stream.append('session', speech('开启之前')); await vi.advanceTimersByTimeAsync(1000);
-    expect(calls).toHaveLength(0);
-    stream.setEnabled(true);
-    stream.append('old-session', speech());
-    stream.append('session', { ...speech('笑声'), isSpeech: false });
-    stream.append('session', speech('……'));
-    await vi.advanceTimersByTimeAsync(1000);
-    expect(calls).toHaveLength(0);
-    stream.append('session', speech('开启之后'));
-    await vi.advanceTimersByTimeAsync(REACTION_COALESCE_MS);
-    expect(calls[0].input.text).toBe('开启之后');
+  it('clears a hidden display and waits for new recognition on visibility restore', async () => {
+    const h = harness(); h.stream.append('session', speech()); const reply = await h.respond(); h.stream.painted(reply.decisionId);
+    h.stream.setVisible(false); expect(h.state().status).toBe('idle'); h.stream.append('session', speech());
+    h.stream.setVisible(true); await vi.advanceTimersByTimeAsync(60_000); expect(h.calls).toHaveLength(1);
+    h.stream.append('session', speech()); expect(h.calls).toHaveLength(2);
   });
-
-  it.each(['new-recording', 'disable', 'clear', 'dispose'] as const)('cancels pending work and discards late transport results after %s', async (action) => {
-    const { stream, calls, respond, state, log } = setup();
-    stream.append('session', speech()); await vi.advanceTimersByTimeAsync(REACTION_COALESCE_MS);
-    stream.append('session', speech('排队中的片段'));
-    if (action === 'new-recording') stream.begin('next-session');
-    if (action === 'disable') stream.setEnabled(false);
-    if (action === 'clear') stream.reset();
-    if (action === 'dispose') stream.dispose();
-    const previousState = state();
-    expect(calls[0].signal.aborted).toBe(true);
-    await respond(); await vi.advanceTimersByTimeAsync(40000);
-    expect(calls).toHaveLength(1);
-    expect(state()).toEqual(previousState);
-    expect(log.mock.calls.some(([event]) => event === 'reaction.displayed')).toBe(false);
+  it('rejects recognition that was already in flight when the task generation changed', () => {
+    const h = harness(); const oldGeneration = h.stream.captureGeneration();
+    h.stream.reset(); h.stream.append('session', speech(), oldGeneration);
+    expect(h.calls).toHaveLength(0);
+    h.stream.append('session', speech(), h.stream.captureGeneration()); expect(h.calls).toHaveLength(1);
   });
-
-  it('recovers from a failed request when new speech arrives, without retrying idle content', async () => {
-    const { stream, calls, respond, state } = setup();
-    stream.append('session', speech()); await vi.advanceTimersByTimeAsync(REACTION_COALESCE_MS);
-    await respond(0, { status: 'error', code: 'timeout', error: 'timeout' });
-    expect(state()).toMatchObject({ status: 'error' });
-    await vi.advanceTimersByTimeAsync(60000);
-    expect(calls).toHaveLength(1);
-    stream.append('session', speech('新的表达'));
-    await vi.advanceTimersByTimeAsync(REACTION_COALESCE_MS);
-    expect(calls[1].input.text).toBe('新的表达');
-    await respond(1);
-    expect(state().status).toBe('replied');
+  it('expires unpainted and already expired replies without counting a display', async () => {
+    const h = harness(); h.stream.append('session', speech()); await h.respond();
+    await vi.advanceTimersByTimeAsync(5000); expect(h.state().status).toBe('idle'); expect(h.acknowledge).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(5000); h.stream.append('session', speech()); await h.respond(1, { expiresAt: Date.now() - 1 });
+    expect(h.state().status).toBe('idle'); expect(h.acknowledge).not.toHaveBeenCalled();
   });
-
-  it('flushes unsent recognition at stop, including sub-window recordings', async () => {
-    const { stream, calls } = setup();
-    stream.append('session', speech('不到两秒的一句话'));
-    stream.complete('session');
-    await vi.advanceTimersByTimeAsync(1);
-    expect(calls).toHaveLength(1);
-    expect(calls[0].input.text).toBe('不到两秒的一句话');
-    stream.append('session', speech('停止后忽略'));
-    await vi.advanceTimersByTimeAsync(10000);
-    expect(calls).toHaveLength(1);
+  it('makes only finite acknowledgement retries and cancels them when the display is cleared', async () => {
+    const h = harness(); h.acknowledge.mockRejectedValue(new Error('network'));
+    h.stream.append('session', speech()); const reply = await h.respond(); h.stream.painted(reply.decisionId);
+    await vi.advanceTimersByTimeAsync(2000); expect(h.acknowledge).toHaveBeenCalledTimes(3);
+    h.stream.reset(); await vi.advanceTimersByTimeAsync(20_000); expect(h.acknowledge).toHaveBeenCalledTimes(3);
   });
+  it('does not call the endpoint when disabled and lets unknown/non-speech reach server rules when enabled', () => {
+    const h = harness(); h.stream.setEnabled(false); h.stream.append('session', speech()); expect(h.calls).toHaveLength(0);
+    h.stream.setEnabled(true); h.stream.append('session', { ...speech('unknown'), isSpeech: false });
+    expect(h.calls[0].input).toMatchObject({ emotion: 'unknown', isSpeech: false });
+  });
+});
+
+it('validates server reply ownership and display text at the browser transport boundary', async () => {
+  const h = harness(); h.stream.append('session', speech()); const input = h.calls[0].input;
+  const valid = { ...input, status: 'replied', decisionId: input.turnId, phraseId: 'new-csv-phrase', text: 'Stay close.', emotion: 'sad',
+    requestId: 'req', latencyMs: 10, expiresAt: Date.now() + 5000, displayMs: 2500, animationGapMs: 5000 };
+  vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify(valid))));
+  expect(await requestReaction(input, new AbortController().signal)).toMatchObject({ text: 'Stay close.' });
+  for (const patch of [{ text: 'Too many words here.' }, { generation: -1 }, { decisionId: 'other' }, { emotion: 'happy' }, { sequence: 999 }]) {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ ...valid, ...patch }))));
+    await expect(requestReaction(input, new AbortController().signal)).rejects.toThrow();
+  }
 });
